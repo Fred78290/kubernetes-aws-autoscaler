@@ -16,10 +16,9 @@ import (
 
 type ConfigurationTest struct {
 	aws.Configuration
-	CloudInit interface{}               `json:"cloud-init"`
-	SSH       types.AutoScalerServerSSH `json:"ssh"`
-	VM        string                    `json:"old-vm"`
-	New       *NewVirtualMachineConf    `json:"new-vm"`
+	CloudInit    interface{}               `json:"cloud-init"`
+	SSH          types.AutoScalerServerSSH `json:"ssh"`
+	InstanceName string                    `json:"instanceName"`
 }
 
 type NewVirtualMachineConf struct {
@@ -106,8 +105,8 @@ func Test_Sudo(t *testing.T) {
 	}
 }
 
-func Test_getVM(t *testing.T) {
-	if testFeature("Test_getVM") {
+func Test_getInstanceID(t *testing.T) {
+	if testFeature("Test_getInstanceID") {
 		config := loadFromJson(confName)
 
 		if instanceID, err := config.GetInstanceID(config.New.Name); err != nil {
@@ -124,8 +123,8 @@ func Test_getVM(t *testing.T) {
 	}
 }
 
-func Test_createVM(t *testing.T) {
-	if testFeature("Test_createVM") {
+func Test_createInstance(t *testing.T) {
+	if testFeature("Test_createInstance") {
 		config := loadFromJson(confName)
 		_, err := config.Create(config.New.Name, config.SSH.GetUserName(), config.SSH.GetAuthKeys(), config.CloudInit, config.New.Network, config.New.Annotation, config.New.Memory, config.New.CPUS, config.New.Disk)
 
@@ -135,8 +134,8 @@ func Test_createVM(t *testing.T) {
 	}
 }
 
-func Test_statusVM(t *testing.T) {
-	if testFeature("Test_statusVM") {
+func Test_statusInstance(t *testing.T) {
+	if testFeature("Test_statusInstance") {
 		config := loadFromJson(confName)
 
 		if instanceID, err := config.GetInstanceID(config.New.Name); err != nil {
@@ -151,8 +150,8 @@ func Test_statusVM(t *testing.T) {
 	}
 }
 
-func Test_powerOnVM(t *testing.T) {
-	if testFeature("Test_powerOnVM") {
+func Test_powerOnInstance(t *testing.T) {
+	if testFeature("Test_powerOnInstance") {
 		config := loadFromJson(confName)
 
 		if instanceID, err := config.GetInstanceID(config.New.Name); err != nil {
@@ -171,8 +170,8 @@ func Test_powerOnVM(t *testing.T) {
 	}
 }
 
-func Test_powerOffVM(t *testing.T) {
-	if testFeature("Test_powerOffVM") {
+func Test_powerOffInstance(t *testing.T) {
+	if testFeature("Test_powerOffInstance") {
 		config := loadFromJson(confName)
 
 		if instanceID, err := config.GetInstanceID(config.New.Name); err != nil {
@@ -187,8 +186,8 @@ func Test_powerOffVM(t *testing.T) {
 	}
 }
 
-func Test_shutdownGuest(t *testing.T) {
-	if testFeature("Test_shutdownGuest") {
+func Test_shutdownInstance(t *testing.T) {
+	if testFeature("Test_shutdownInstance") {
 		config := loadFromJson(confName)
 
 		if instanceID, err := config.GetInstanceID(config.New.Name); err != nil {
@@ -203,8 +202,8 @@ func Test_shutdownGuest(t *testing.T) {
 	}
 }
 
-func Test_deleteVM(t *testing.T) {
-	if testFeature("Test_deleteVM") {
+func Test_deleteInstance(t *testing.T) {
+	if testFeature("Test_deleteInstance") {
 		config := loadFromJson(confName)
 
 		if instanceID, err := config.GetInstanceID(config.New.Name); err != nil {

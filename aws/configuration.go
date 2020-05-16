@@ -40,7 +40,7 @@ type Configuration struct {
 	Timeout      time.Duration `json:"timeout"`
 	ImageID      string        `json:"ami"`
 	InstanceType string        `json:"instance-type"`
-	IamRole      string        `json:"iam-role"`
+	IamRole      string        `json:"iam-role-arn"`
 	KeyName      string        `json:"keyName"`
 	Tags         []Tag         `json:"tags"`
 	Network      *Network      `json:"network"`
@@ -126,6 +126,8 @@ func (conf *Configuration) newSession() (*session.Session, error) {
 		cred = credentials.NewStaticCredentials(conf.AccessKey, conf.SecretKey, conf.Token)
 	} else if !isNullOrEmpty(conf.AccessKey) && !isNullOrEmpty(conf.SecretKey) {
 		cred = credentials.NewStaticCredentials(conf.AccessKey, conf.SecretKey, "")
+	} else if !isNullOrEmpty(conf.Profile) {
+		cred = credentials.NewSharedCredentials("", conf.Profile)
 	} else {
 		cred = nil
 	}
