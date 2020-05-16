@@ -8,15 +8,20 @@ SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
 CACHE=~/.local/aws/cache
 TARGET_IMAGE=bionic-kubernetes-$KUBERNETES_VERSION
 OSDISTRO=$(uname -s)
-SEEDIMAGE="ami-0701e7be9b2a77600"
 SSH_KEYNAME="aws-k8s-key"
 CURDIR=$(dirname $0)
-USER=ubuntu
-VPC_ID="vpc-1a9f837c"
-VPC_SUBNET_ID="subnet-d824af82"
-VPC_SECURITY_GROUPID="sg-01f59f02cb92d04c4"
+
+SEED_USER=ubuntu
+SEED_IMAGE="<to be filled>"
+VPC_ID="<to be filled>"
+VPC_SUBNET_ID="<to be filled>"
+VPC_SECURITY_GROUPID="<to be filled>"
+
 VPC_USE_PUBLICIP=true
+
 SSH_OPTIONS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+
+source ${CURDIR}/aws.defs
 
 if [ "$OSDISTRO" == "Linux" ]; then
     TZ=$(cat /etc/timezone)
@@ -38,10 +43,10 @@ while true ; do
         -i|--custom-image) TARGET_IMAGE="$2" ; shift 2;;
         -k|--ssh-key) SSH_KEY=$2 ; shift 2;;
         -n|--cni-version) CNI_VERSION=$2 ; shift 2;;
-        -u|--user) USER=$2 ; shift 2;;
+        -u|--user) SEED_USER=$2 ; shift 2;;
         -v|--kubernetes-version) KUBERNETES_VERSION=$2 ; shift 2;;
 
-        --ami) SEEDIMAGE=$2 ; shift 2;;
+        --ami) SEED_IMAGE=$2 ; shift 2;;
         --ssh-key-name) SSH_KEY_NAME=$2 ; shift 2;;
         --vpc-id) VC_NETWORK_PUBLIC="${2}" ; shift 2;;
         --subnet-id) VPC_SUBNET_ID="${2}" ; shift 2;;
@@ -54,7 +59,7 @@ while true ; do
 done
 
 TARGET_IMAGE_ID=$(aws ec2 describe-images --profile ${AWS_PROFILE} --region ${AWS_REGION} --filters "Name=architecture,Values=x86_64" "Name=name,Values=${TARGET_IMAGE}" "Name=virtualization-type,Values=hvm" 2>/dev/null | jq '.Images[0].ImageId' | tr -d '"' | sed -e 's/null//g')
-SOURCE_IMAGE_ID=$(aws ec2 describe-images --profile ${AWS_PROFILE} --region ${AWS_REGION} --image-ids "${SEEDIMAGE}" 2>/dev/null | jq '.Images[0].ImageId' | tr -d '"' | sed -e 's/null//g')
+SOURCE_IMAGE_ID=$(aws ec2 describe-images --profile ${AWS_PROFILE} --region ${AWS_REGION} --image-ids "${SEED_IMAGE}" 2>/dev/null | jq '.Images[0].ImageId' | tr -d '"' | sed -e 's/null//g')
 KEYEXISTS=$(aws ec2 describe-key-pairs --profile ${AWS_PROFILE} --region ${AWS_REGION} --key-names "${SSH_KEYNAME}" 2>/dev/null | jq  '.KeyPairs[].KeyName' | tr -d '"')
 
 if [ ! -z "${TARGET_IMAGE_ID}" ]; then
@@ -203,11 +208,11 @@ else
     PUBLIC_IP_OPTIONS=--no-associate-public-ip-address
 fi
 
-echo "Launch instance ${SEEDIMAGE} to ${TARGET_IMAGE}"
+echo "Launch instance ${SEED_IMAGE} to ${TARGET_IMAGE}"
 LAUNCHED_INSTANCE=$(aws ec2 run-instances \
     --profile ${AWS_PROFILE} \
     --region ${AWS_REGION} \
-    --image-id ${SEEDIMAGE} \
+    --image-id ${SEED_IMAGE} \
     --count 1  \
     --instance-type t2.micro \
     --key-name ${SSH_KEYNAME} \
@@ -251,13 +256,13 @@ echo -n "Wait for ${TARGET_IMAGE} ssh ready for on ${IP_TYPE} IP=${IPADDR}"
 while :
 do
     echo -n "."
-    scp ${SSH_OPTIONS} -o ConnectTimeout=1 "${CACHE}/prepare-image.sh" "${USER}@${IPADDR}":~ 2>/dev/null && break
+    scp ${SSH_OPTIONS} -o ConnectTimeout=1 "${CACHE}/prepare-image.sh" "${SEED_USER}@${IPADDR}":~ 2>/dev/null && break
     sleep 1
 done
 
 echo
 
-ssh ${SSH_OPTIONS} -t "${USER}@${IPADDR}" sudo ./prepare-image.sh
+ssh ${SSH_OPTIONS} -t "${SEED_USER}@${IPADDR}" sudo ./prepare-image.sh
 
 aws ec2 stop-instances --profile ${AWS_PROFILE} --region ${AWS_REGION} --instance-ids "${LAUNCHED_ID}" &> /dev/null
 
@@ -271,7 +276,7 @@ echo
 
 echo "Created image ${TARGET_IMAGE} with kubernetes version ${KUBERNETES_VERSION}"
 
-IMAGEID=$(aws ec2 create-image --profile ${AWS_PROFILE} --region ${AWS_REGION} --instance-id "${LAUNCHED_ID}" --name "${TARGET_IMAGE}" --description "Kubernetes ${KUBERNETES_VERSION} image ready to use, based on AMI ${SEEDIMAGE}" | jq .ImageId | tr -d '"' | sed -e 's/null//g')
+IMAGEID=$(aws ec2 create-image --profile ${AWS_PROFILE} --region ${AWS_REGION} --instance-id "${LAUNCHED_ID}" --name "${TARGET_IMAGE}" --description "Kubernetes ${KUBERNETES_VERSION} image ready to use, based on AMI ${SEED_IMAGE}" | jq .ImageId | tr -d '"' | sed -e 's/null//g')
 
 if [ -z $IMAGEID ]; then
     echo "Something goes wrong when creating image from ${TARGET_IMAGE}"
