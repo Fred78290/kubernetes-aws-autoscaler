@@ -41,7 +41,6 @@ export VOLUME_SIZE=10
 
 export SEED_USER="<to be filled>"
 export SEED_IMAGE="<to be filled>"
-export IAM_ROLE_NAME="<to be filled>"
 export IAM_ROLE_ARN="<to be filled>"
 export VPC_ID="<to be filled>"
 export VPC_SUBNET_ID="<to be filled>"
@@ -510,6 +509,7 @@ AUTOSCALER_CONFIG=$(cat <<EOF
             "profile": "${AWS_PROFILE}",
             "region" : "${AWS_REGION}",
             "keyName": "${SSH_KEYNAME}",
+            "iam-role-arn": "${IAM_ROLE_ARN}",
             "timeout": 300,
             "tags": [
                 {
