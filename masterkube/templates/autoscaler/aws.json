@@ -1,0 +1,84 @@
+{
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+        "name": "aws-autoscaler",
+        "namespace": "kube-system",
+        "labels": {
+            "k8s-app": "aws-autoscaler"
+        }
+    },
+    "spec": {
+        "replicas": 1,
+        "selector": {
+            "matchLabels": {
+                "k8s-app": "aws-autoscaler"
+            }
+        },
+        "template": {
+            "metadata": {
+                "labels": {
+                    "k8s-app": "aws-autoscaler"
+                },
+                "annotations": {
+                    "scheduler.alpha.kubernetes.io/critical-pod": ""
+                }
+            },
+            "spec": {
+                "nodeSelector": {
+                    "master": "true"
+                },
+                "containers": [
+                    {
+                        "image": "fred78290/aws-autoscaler:v1.18.2",
+                        "name": "aws-autoscaler",
+                        "resources": {
+                            "limits": {
+                                "cpu": "100m",
+                                "memory": "300Mi"
+                            },
+                            "requests": {
+                                "cpu": "100m",
+                                "memory": "300Mi"
+                            }
+                        },
+                        "command": [
+                            "./aws-autoscaler",
+                            "--kubeconfig=/etc/kubernetes/config",
+                            "--config=/etc/cluster/kubernetes-aws-autoscaler.json",
+                            "--save=/etc/cluster/aws-autoscaler-state.json",
+                            "-v=1",
+                            "-logtostderr=true"
+                        ],
+                        "imagePullPolicy": "Always",
+                        "volumeMounts": [
+                            {
+                                "name": "kubernetes",
+                                "mountPath": "/etc/kubernetes/config",
+                                "readOnly": true
+                            },
+                            {
+                                "name": "aws-autoscaler",
+                                "mountPath": "/etc/cluster"
+                            }
+                        ]
+                    }
+                ],
+                "volumes": [
+                    {
+                        "name": "aws-autoscaler",
+                        "hostPath": {
+                            "path": "/etc/cluster"
+                        }
+                    },
+                    {
+                        "name": "kubernetes",
+                        "hostPath": {
+                            "path": "/etc/kubernetes/admin.conf"
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}
