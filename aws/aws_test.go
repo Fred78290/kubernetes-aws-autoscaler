@@ -157,7 +157,7 @@ func Test_powerOnVM(t *testing.T) {
 
 		if instanceID, err := config.GetInstanceID(config.New.Name); err != nil {
 			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.New.Name))
-		} else if status, err := config.Status(instanceID); assert.NoError(t, err, "Can't get status on VM") && status.Powered == false {
+		} else if status, err := config.Status(instanceID); assert.NoError(t, err, "Can't get status on VM") && status.Powered == false {
 			err = config.PowerOn(instanceID)
 
 			if assert.NoError(t, err, "Can't power on VM") {
