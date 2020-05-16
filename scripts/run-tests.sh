@@ -14,16 +14,5 @@ export Test_powerOffVM=YES
 export Test_shutdownGuest=YES
 export Test_deleteVM=YES
 
-function cleanup {
-  echo "Kill vcsim"
-  kill $GOVC_SIM_PID
-}
-
-trap cleanup EXIT
-
-echo "Launch vcsim"
-vcsim -pg 2 &
-GOVC_SIM_PID=$!
-
 echo "Run test"
-go test --test.short -race ./aws
+#go test --test.short -race ./aws
