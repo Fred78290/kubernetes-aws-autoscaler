@@ -20,7 +20,6 @@ masterkube/cluster/*
 masterkube/kubernetes/*
 masterkube/config/*
 masterkube/etc/ssl/*
-
-aws/*.json
+masterkube/bin/aws.defs
 
 kubernetes-aws-autoscaler
