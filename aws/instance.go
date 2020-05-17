@@ -275,9 +275,10 @@ func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType, user
 			interfaces[index] = inf
 		}
 
-		input.NetworkInterfaces = interfaces
-
-	} else {
+		if len(interfaces) > 0 {
+			input.NetworkInterfaces = interfaces
+		}
+	} else if len(instance.config.Network.ENI) > 0 {
 		input.SubnetId = aws.String(instance.config.Network.ENI[0].SubnetID)
 		input.SecurityGroupIds = []*string{
 			aws.String(instance.config.Network.ENI[0].SecurityGroupID),
