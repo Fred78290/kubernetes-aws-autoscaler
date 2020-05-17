@@ -209,7 +209,7 @@ func (vm *AutoScalerServerNode) setNodeLabels(nodeLabels, systemLabels Kubernete
 		"node",
 		vm.NodeName,
 		fmt.Sprintf("%s=%s", constantes.NodeLabelGroupName, vm.NodeGroupID),
-		fmt.Sprintf("%s=%s", constantes.AnnotationInstanceID, vm.RunningInstance.InstanceID),
+		fmt.Sprintf("%s=%s", constantes.AnnotationInstanceID, *vm.RunningInstance.InstanceID),
 		fmt.Sprintf("%s=%s", constantes.AnnotationNodeAutoProvisionned, strconv.FormatBool(vm.AutoProvisionned)),
 		fmt.Sprintf("%s=%d", constantes.AnnotationNodeIndex, vm.NodeIndex),
 		"--overwrite",
