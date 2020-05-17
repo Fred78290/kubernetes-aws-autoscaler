@@ -10,6 +10,7 @@ require (
 	golang.org/x/crypto v0.0.0-20200429183012-4b2356b1ed79
 	golang.org/x/net v0.0.0-20200501053045-e0ff5e5a1de5 // indirect
 	google.golang.org/grpc v1.26.0
+	gopkg.in/yaml.v2 v2.2.8
 	k8s.io/api v0.18.2
 	k8s.io/client-go v0.18.2
 )
