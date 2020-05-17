@@ -29,7 +29,7 @@ func GetEc2Instance(config *Configuration, instanceName string) (*Ec2Instance, e
 
 		input := &ec2.DescribeInstancesInput{
 			Filters: []*ec2.Filter{
-				&ec2.Filter{
+				{
 					Name: aws.String("tag:Name"),
 					Values: []*string{
 						aws.String(instanceName),
@@ -252,7 +252,7 @@ func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType, user
 	}
 
 	input.TagSpecifications = []*ec2.TagSpecification{
-		&ec2.TagSpecification{
+		{
 			ResourceType: aws.String(ec2.ResourceTypeInstance),
 			Tags:         instanceTags,
 		},
