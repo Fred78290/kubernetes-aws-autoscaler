@@ -173,5 +173,5 @@ const (
 	ErrWrongStateMachine = "Unexpected instance state %s for instance %s, expected prending or running"
 
 	// ErrWaitIPTimeout error msg
-	ErrWaitIPTimeout = "Unable to SSH %s after %d seconds"
+	ErrWaitIPTimeout = "Unable to SSH %s after %f seconds"
 )

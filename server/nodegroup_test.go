@@ -35,18 +35,17 @@ type nodeTest struct {
 
 func createTestNode(ng *AutoScalerServerNodeGroup) *AutoScalerServerNode {
 	return &AutoScalerServerNode{
-		ProviderID:  ng.providerIDForNode(testNodeName),
-		NodeGroupID: testGroupID,
-		NodeName:    testNodeName,
-		Memory:      2048,
-		CPU:         2,
-		Disk:        5120,
+		ProviderID:   ng.providerIDForNode(testNodeName),
+		NodeGroupID:  testGroupID,
+		NodeName:     testNodeName,
+		InstanceType: "t2.small",
+		Disk:         5120,
 		Addresses: []string{
 			"127.0.0.1",
 		},
 		State:            AutoScalerServerNodeStateNotCreated,
 		AutoProvisionned: true,
-		VSphereConfig:    ng.configuration.GetVSphereConfiguration(testGroupID),
+		AwsConfig:        ng.configuration.GetAwsConfiguration(testGroupID),
 		serverConfig:     ng.configuration,
 	}
 }
@@ -72,14 +71,9 @@ func newTestNodeGroup() (*types.AutoScalerServerConfig, *AutoScalerServerNodeGro
 		ng := &AutoScalerServerNodeGroup{
 			ServiceIdentifier:   testProviderID,
 			NodeGroupIdentifier: testGroupID,
-			Machine: &types.MachineCharacteristic{
-				Memory: 4096,
-				Vcpu:   4,
-				Disk:   5120,
-			},
-			Status:      NodegroupNotCreated,
-			MinNodeSize: 0,
-			MaxNodeSize: 5,
+			Status:              NodegroupNotCreated,
+			MinNodeSize:         0,
+			MaxNodeSize:         5,
 			NodeLabels: KubernetesLabel{
 				"monitor":  "true",
 				"database": "true",
