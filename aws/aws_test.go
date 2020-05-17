@@ -23,7 +23,14 @@ type ConfigurationTest struct {
 }
 
 var testConfig *ConfigurationTest
-var confName = "test.json"
+
+func getConfFile() string {
+	if config := os.Getenv("TEST_CONFIG"); config != "" {
+		return config
+	}
+
+	return "aws_test.json"
+}
 
 func testFeature(name string) bool {
 	if feature := os.Getenv(name); feature != "" {
@@ -76,14 +83,14 @@ func loadFromJson(fileName string) *ConfigurationTest {
 func (config *ConfigurationTest) CheckIfIPIsReady(nodename, address string) error {
 	command := fmt.Sprintf("hostnamectl set-hostname %s", nodename)
 
-	_, err := utils.Sudo(&config.SSH, address, command)
+	_, err := utils.Sudo(&config.SSH, address, 0.5, command)
 
 	return err
 }
 
 func Test_AuthMethodKey(t *testing.T) {
 	if testFeature("Test_AuthMethodKey") {
-		config := loadFromJson(confName)
+		config := loadFromJson(getConfFile())
 
 		signer := utils.AuthMethodFromPrivateKeyFile(config.SSH.GetAuthKeys())
 
@@ -95,9 +102,9 @@ func Test_AuthMethodKey(t *testing.T) {
 
 func Test_Sudo(t *testing.T) {
 	if testFeature("Test_Sudo") {
-		config := loadFromJson(confName)
+		config := loadFromJson(getConfFile())
 
-		out, err := utils.Sudo(&config.SSH, "localhost", "ls")
+		out, err := utils.Sudo(&config.SSH, "localhost", 10, "ls")
 
 		if assert.NoError(t, err) {
 			t.Log(out)
@@ -107,7 +114,7 @@ func Test_Sudo(t *testing.T) {
 
 func Test_getInstanceID(t *testing.T) {
 	if testFeature("Test_getInstanceID") {
-		config := loadFromJson(confName)
+		config := loadFromJson(getConfFile())
 
 		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
 			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.InstanceName))
@@ -125,7 +132,7 @@ func Test_getInstanceID(t *testing.T) {
 
 func Test_createInstance(t *testing.T) {
 	if testFeature("Test_createInstance") {
-		config := loadFromJson(confName)
+		config := loadFromJson(getConfFile())
 
 		_, err := config.Create(0, "test-aws-autoscaler", config.InstanceName, config.InstanceType, config.Disk, config.CloudInit)
 
@@ -137,7 +144,7 @@ func Test_createInstance(t *testing.T) {
 
 func Test_statusInstance(t *testing.T) {
 	if testFeature("Test_statusInstance") {
-		config := loadFromJson(confName)
+		config := loadFromJson(getConfFile())
 
 		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
 			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.InstanceName))
@@ -153,7 +160,7 @@ func Test_statusInstance(t *testing.T) {
 
 func Test_waitReadyInstance(t *testing.T) {
 	if testFeature("Test_waitReadyInstance") {
-		config := loadFromJson(confName)
+		config := loadFromJson(getConfFile())
 
 		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
 			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.InstanceName))
@@ -172,7 +179,7 @@ func Test_waitReadyInstance(t *testing.T) {
 }
 func Test_powerOnInstance(t *testing.T) {
 	if testFeature("Test_powerOnInstance") {
-		config := loadFromJson(confName)
+		config := loadFromJson(getConfFile())
 
 		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
 			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.InstanceName))
@@ -196,7 +203,7 @@ func Test_powerOnInstance(t *testing.T) {
 
 func Test_powerOffInstance(t *testing.T) {
 	if testFeature("Test_powerOffInstance") {
-		config := loadFromJson(confName)
+		config := loadFromJson(getConfFile())
 
 		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
 			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.InstanceName))
@@ -212,7 +219,7 @@ func Test_powerOffInstance(t *testing.T) {
 
 func Test_shutdownInstance(t *testing.T) {
 	if testFeature("Test_shutdownInstance") {
-		config := loadFromJson(confName)
+		config := loadFromJson(getConfFile())
 
 		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
 			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.InstanceName))
@@ -228,7 +235,7 @@ func Test_shutdownInstance(t *testing.T) {
 
 func Test_deleteInstance(t *testing.T) {
 	if testFeature("Test_deleteInstance") {
-		config := loadFromJson(confName)
+		config := loadFromJson(getConfFile())
 
 		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
 			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.InstanceName))
