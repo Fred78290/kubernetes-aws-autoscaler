@@ -109,7 +109,7 @@ func createClient(conf *Configuration) (*ec2.EC2, error) {
 	}
 
 	// Create EC2 service client
-	return ec2.New(sess), nil
+	return ec2.New(sess, aws.NewConfig().WithLogger(conf).WithLogLevel(aws.LogDebugWithHTTPBody).WithLogLevel(aws.LogDebugWithSigning)), nil
 }
 
 func (instance *Ec2Instance) getEc2Instance() (*ec2.Instance, error) {

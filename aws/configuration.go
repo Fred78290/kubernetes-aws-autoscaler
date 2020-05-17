@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/golang/glog"
 	"gopkg.in/yaml.v2"
 )
 
@@ -109,6 +110,11 @@ func Copy(dst interface{}, src interface{}) error {
 	}
 
 	return nil
+}
+
+// Log logging
+func (conf *Configuration) Log(args ...interface{}) {
+	glog.Infoln(args...)
 }
 
 // GetInstanceID return aws instance id from named ec2 instance
