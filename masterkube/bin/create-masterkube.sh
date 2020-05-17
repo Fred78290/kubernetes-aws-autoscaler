@@ -513,8 +513,8 @@ AUTOSCALER_CONFIG=$(cat <<EOF
             "timeout": 300,
             "tags": [
                 {
-                    "key": "NodeGroup",
-                    "value": "${NODEGROUP_NAME}"
+                    "key": "CustomTag",
+                    "value": "CustomValue"
                 }
             ],
             "network": {

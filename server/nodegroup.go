@@ -159,8 +159,7 @@ func (g *AutoScalerServerNodeGroup) addNodes(delta int) error {
 
 		nodeName := g.nodeName(g.LastCreatedNodeIndex)
 
-		// Clone the aws config to allow increment IP address
-		if awsConfig, err := g.configuration.GetAwsConfiguration(g.NodeGroupIdentifier).Clone(nodeName, g.LastCreatedNodeIndex); err == nil {
+		if awsConfig := g.configuration.GetAwsConfiguration(g.NodeGroupIdentifier); awsConfig != nil {
 
 			node := &AutoScalerServerNode{
 				ProviderID:       g.providerIDForNode(nodeName),
@@ -182,7 +181,7 @@ func (g *AutoScalerServerNodeGroup) addNodes(delta int) error {
 
 			g.pendingNodes[node.NodeName] = node
 		} else {
-			return err
+			return fmt.Errorf("Unable to find node group named %s", g.NodeGroupIdentifier)
 		}
 	}
 

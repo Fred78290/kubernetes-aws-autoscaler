@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/Fred78290/kubernetes-aws-autoscaler/types"
 	"github.com/golang/glog"
@@ -93,12 +94,13 @@ func Scp(connect *types.AutoScalerServerSSH, host, src, dst string) error {
 }
 
 // Sudo exec ssh command as sudo
-func Sudo(connect *types.AutoScalerServerSSH, host string, command ...string) (string, error) {
+func Sudo(connect *types.AutoScalerServerSSH, host string, timeoutInSeconds float64, command ...string) (string, error) {
 	var sshConfig *ssh.ClientConfig
 	var err error
 
 	if len(connect.Password) > 0 {
 		sshConfig = &ssh.ClientConfig{
+			Timeout:         time.Millisecond * time.Duration(timeoutInSeconds*1000),
 			User:            connect.GetUserName(),
 			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 			Auth: []ssh.AuthMethod{
@@ -107,6 +109,7 @@ func Sudo(connect *types.AutoScalerServerSSH, host string, command ...string) (s
 		}
 	} else {
 		sshConfig = &ssh.ClientConfig{
+			Timeout:         time.Millisecond * time.Duration(timeoutInSeconds*1000),
 			User:            connect.GetUserName(),
 			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 			Auth: []ssh.AuthMethod{

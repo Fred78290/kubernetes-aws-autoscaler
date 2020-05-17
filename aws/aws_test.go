@@ -19,15 +19,7 @@ type ConfigurationTest struct {
 	CloudInit    interface{}               `json:"cloud-init"`
 	SSH          types.AutoScalerServerSSH `json:"ssh"`
 	InstanceName string                    `json:"instanceName"`
-}
-
-type NewVirtualMachineConf struct {
-	Name       string
-	Annotation string
-	Memory     int
-	CPUS       int
-	Disk       int
-	Network    *aws.Network
+	InstanceType string                    `json:"instanceType"`
 }
 
 var testConfig *ConfigurationTest
@@ -81,6 +73,14 @@ func loadFromJson(fileName string) *ConfigurationTest {
 	return testConfig
 }
 
+func (config *ConfigurationTest) CheckIfIPIsReady(nodename, address string) error {
+	command := fmt.Sprintf("hostnamectl set-hostname %s", nodename)
+
+	_, err := utils.Sudo(&config.SSH, address, command)
+
+	return err
+}
+
 func Test_AuthMethodKey(t *testing.T) {
 	if testFeature("Test_AuthMethodKey") {
 		config := loadFromJson(confName)
@@ -109,11 +109,11 @@ func Test_getInstanceID(t *testing.T) {
 	if testFeature("Test_getInstanceID") {
 		config := loadFromJson(confName)
 
-		if instanceID, err := config.GetInstanceID(config.New.Name); err != nil {
-			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.New.Name))
+		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
+			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.InstanceName))
 		} else {
-			if assert.NotNil(t, instanceID) {
-				status, err := vm.Status(ctx)
+			if assert.NotNil(t, instance) {
+				status, err := instance.Status()
 
 				if assert.NoErrorf(t, err, "Can't get status of VM") {
 					t.Logf("The power of vm is:%v", status.Powered)
@@ -126,7 +126,8 @@ func Test_getInstanceID(t *testing.T) {
 func Test_createInstance(t *testing.T) {
 	if testFeature("Test_createInstance") {
 		config := loadFromJson(confName)
-		_, err := config.Create(config.New.Name, config.SSH.GetUserName(), config.SSH.GetAuthKeys(), config.CloudInit, config.New.Network, config.New.Annotation, config.New.Memory, config.New.CPUS, config.New.Disk)
+
+		_, err := config.Create(0, "test-aws-autoscaler", config.InstanceName, config.InstanceType, config.Disk, config.CloudInit)
 
 		if assert.NoError(t, err, "Can't create VM") {
 			t.Logf("VM created")
@@ -138,33 +139,56 @@ func Test_statusInstance(t *testing.T) {
 	if testFeature("Test_statusInstance") {
 		config := loadFromJson(confName)
 
-		if instanceID, err := config.GetInstanceID(config.New.Name); err != nil {
-			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.New.Name))
+		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
+			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.InstanceName))
 		} else {
-			status, err := config.Status(instanceID)
+			status, err := instance.Status()
 
 			if assert.NoError(t, err, "Can't get status VM") {
-				t.Logf("The power of vm %s is:%v", config.New.Name, status.Powered)
+				t.Logf("The power of vm %s is:%v", config.InstanceName, status.Powered)
 			}
 		}
 	}
 }
 
+func Test_waitReadyInstance(t *testing.T) {
+	if testFeature("Test_waitReadyInstance") {
+		config := loadFromJson(confName)
+
+		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
+			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.InstanceName))
+		} else if status, err := instance.Status(); assert.NoError(t, err, "Can't get status on VM") && status.Powered == false {
+			if status.Powered == true {
+				ipaddr, err := instance.WaitForIP(config)
+
+				if assert.NoError(t, err, "Can't get IP") {
+					t.Logf("VM powered with IP:%s", *ipaddr)
+				}
+			} else {
+				t.Logf("VM already powered with IP:%s", status.Address)
+			}
+		}
+	}
+}
 func Test_powerOnInstance(t *testing.T) {
 	if testFeature("Test_powerOnInstance") {
 		config := loadFromJson(confName)
 
-		if instanceID, err := config.GetInstanceID(config.New.Name); err != nil {
-			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.New.Name))
-		} else if status, err := config.Status(instanceID); assert.NoError(t, err, "Can't get status on VM") && status.Powered == false {
-			err = config.PowerOn(instanceID)
+		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
+			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.InstanceName))
+		} else if status, err := instance.Status(); assert.NoError(t, err, "Can't get status on VM") && status.Powered == false {
+			if status.Powered == false {
+				err = instance.PowerOn()
 
-			if assert.NoError(t, err, "Can't power on VM") {
-				ipaddr, err := config.WaitForIP(config.New.Name)
+				if assert.NoError(t, err, "Can't power on VM") {
+					ipaddr, err := instance.WaitForIP(config)
 
-				if assert.NoError(t, err, "Can't get IP") {
-					t.Logf("VM powered with IP:%s", ipaddr)
+					if assert.NoError(t, err, "Can't get IP") {
+						t.Logf("VM powered with IP:%s", *ipaddr)
+					}
 				}
+			} else {
+				t.Logf("VM already powered with IP:%s", status.Address)
 			}
 		}
 	}
@@ -174,10 +198,10 @@ func Test_powerOffInstance(t *testing.T) {
 	if testFeature("Test_powerOffInstance") {
 		config := loadFromJson(confName)
 
-		if instanceID, err := config.GetInstanceID(config.New.Name); err != nil {
-			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.New.Name))
-		} else if status, err := config.Status(instanceID); assert.NoError(t, err, "Can't get status on VM") && status.Powered {
-			err = config.PowerOff(instanceID)
+		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
+			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.InstanceName))
+		} else if status, err := instance.Status(); assert.NoError(t, err, "Can't get status on VM") && status.Powered {
+			err = instance.PowerOff()
 
 			if assert.NoError(t, err, "Can't power off VM") {
 				t.Logf("VM shutdown")
@@ -190,10 +214,10 @@ func Test_shutdownInstance(t *testing.T) {
 	if testFeature("Test_shutdownInstance") {
 		config := loadFromJson(confName)
 
-		if instanceID, err := config.GetInstanceID(config.New.Name); err != nil {
-			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.New.Name))
-		} else if status, err := config.Status(instanceID); assert.NoError(t, err, "Can't get status on VM") && status.Powered {
-			err = config.ShutdownGuest(instanceID)
+		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
+			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.InstanceName))
+		} else if status, err := instance.Status(); assert.NoError(t, err, "Can't get status on VM") && status.Powered {
+			err = instance.ShutdownGuest()
 
 			if assert.NoError(t, err, "Can't power off VM") {
 				t.Logf("VM shutdown")
@@ -206,10 +230,10 @@ func Test_deleteInstance(t *testing.T) {
 	if testFeature("Test_deleteInstance") {
 		config := loadFromJson(confName)
 
-		if instanceID, err := config.GetInstanceID(config.New.Name); err != nil {
-			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.New.Name))
+		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
+			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.InstanceName))
 		} else {
-			err := config.Delete(instanceID)
+			err := instance.Delete()
 
 			if assert.NoError(t, err, "Can't delete VM") {
 				t.Logf("VM deleted")

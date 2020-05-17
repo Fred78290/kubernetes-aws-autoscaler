@@ -59,9 +59,9 @@ type AutoScalerServerNode struct {
 	Disk             int                       `json:"disk"`
 	Addresses        []string                  `json:"addresses"`
 	State            AutoScalerServerNodeState `json:"state"`
-	InstanceID       string                    `json:"instance-id"`
 	AutoProvisionned bool                      `json:"auto"`
 	AwsConfig        *aws.Configuration        `json:"aws"`
+	RunningInstance  *aws.Ec2Instance
 	serverConfig     *types.AutoScalerServerConfig
 }
 
@@ -93,7 +93,7 @@ func (vm *AutoScalerServerNode) prepareKubelet() (string, error) {
 		return out, err
 	}
 
-	if out, err = utils.Sudo(vm.serverConfig.SSH, vm.Addresses[0], fmt.Sprintf("bash %s", fName)); err != nil {
+	if out, err = utils.Sudo(vm.serverConfig.SSH, vm.Addresses[0], vm.AwsConfig.Timeout, fmt.Sprintf("bash %s", fName)); err != nil {
 		glog.Errorf("Unable to ssh node %s address:%s, reason:%s", vm.Addresses[0], vm.NodeName, err)
 
 		return out, err
@@ -169,7 +169,7 @@ func (vm *AutoScalerServerNode) kubeAdmJoin() error {
 		args = append(args, kubeAdm.ExtraArguments...)
 	}
 
-	if _, err := utils.Sudo(vm.serverConfig.SSH, vm.Addresses[0], strings.Join(args, " ")); err != nil {
+	if _, err := utils.Sudo(vm.serverConfig.SSH, vm.Addresses[0], vm.AwsConfig.Timeout, strings.Join(args, " ")); err != nil {
 		return err
 	}
 
@@ -209,7 +209,7 @@ func (vm *AutoScalerServerNode) setNodeLabels(nodeLabels, systemLabels Kubernete
 		"node",
 		vm.NodeName,
 		fmt.Sprintf("%s=%s", constantes.NodeLabelGroupName, vm.NodeGroupID),
-		fmt.Sprintf("%s=%s", constantes.AnnotationInstanceID, vm.InstanceID),
+		fmt.Sprintf("%s=%s", constantes.AnnotationInstanceID, vm.RunningInstance.InstanceID),
 		fmt.Sprintf("%s=%s", constantes.AnnotationNodeAutoProvisionned, strconv.FormatBool(vm.AutoProvisionned)),
 		fmt.Sprintf("%s=%d", constantes.AnnotationNodeIndex, vm.NodeIndex),
 		"--overwrite",
@@ -294,10 +294,11 @@ func (vm *AutoScalerServerNode) syncFolders() (string, error) {
 	return "", nil
 }
 
+// CheckIfIPIsReady method SSH test IP
 func (vm *AutoScalerServerNode) CheckIfIPIsReady(nodename, address string) error {
 	command := fmt.Sprintf("hostnamectl set-hostname %s", nodename)
 
-	_, err := utils.Sudo(vm.serverConfig.SSH, vm.Addresses[0], command)
+	_, err := utils.Sudo(vm.serverConfig.SSH, address, 0.5, command)
 
 	return err
 }
@@ -310,7 +311,6 @@ func (vm *AutoScalerServerNode) launchVM(nodeLabels, systemLabels KubernetesLabe
 	var output string
 
 	aws := vm.AwsConfig
-	userInfo := vm.serverConfig.SSH
 
 	glog.Infof("Launch VM:%s for nodegroup: %s", vm.NodeName, vm.NodeGroupID)
 
@@ -322,11 +322,11 @@ func (vm *AutoScalerServerNode) launchVM(nodeLabels, systemLabels KubernetesLabe
 
 		err = fmt.Errorf(constantes.ErrVMAlreadyCreated, vm.NodeName)
 
-	} else if vm.InstanceID, err = aws.Create(vm.NodeName, userInfo.GetUserName(), vm.InstanceType, vm.Disk, vm.serverConfig.CloudInit); err != nil {
+	} else if vm.RunningInstance, err = aws.Create(vm.NodeIndex, vm.NodeGroupID, vm.NodeName, vm.InstanceType, vm.Disk, vm.serverConfig.CloudInit); err != nil {
 
 		err = fmt.Errorf(constantes.ErrUnableToLaunchVM, vm.NodeName, err)
 
-	} else if _, err = aws.WaitForIP(vm.InstanceID, vm); err != nil {
+	} else if _, err = vm.RunningInstance.WaitForIP(vm); err != nil {
 
 		err = fmt.Errorf(constantes.ErrStartVMFailed, vm.NodeName, err)
 
@@ -376,9 +376,8 @@ func (vm *AutoScalerServerNode) startVM() error {
 	glog.Infof("Start VM:%s", vm.NodeName)
 
 	kubeconfig := vm.serverConfig.KubeConfig
-	aws := vm.AwsConfig
 
-	if vm.AutoProvisionned == false {
+	if vm.AutoProvisionned == false || vm.RunningInstance == nil {
 
 		err = fmt.Errorf(constantes.ErrVMNotProvisionnedByMe, vm.NodeName)
 
@@ -388,11 +387,11 @@ func (vm *AutoScalerServerNode) startVM() error {
 
 	} else if state == AutoScalerServerNodeStateStopped {
 
-		if err = aws.PowerOn(vm.InstanceID); err != nil {
+		if err = vm.RunningInstance.PowerOn(); err != nil {
 
 			err = fmt.Errorf(constantes.ErrStartVMFailed, vm.NodeName, err)
 
-		} else if _, err = aws.WaitForIP(vm.InstanceID, vm); err != nil {
+		} else if _, err = vm.RunningInstance.WaitForIP(vm); err != nil {
 
 			err = fmt.Errorf(constantes.ErrStartVMFailed, vm.NodeName, err)
 
@@ -443,9 +442,8 @@ func (vm *AutoScalerServerNode) stopVM() error {
 	glog.Infof("Stop VM:%s", vm.NodeName)
 
 	kubeconfig := vm.serverConfig.KubeConfig
-	aws := vm.AwsConfig
 
-	if vm.AutoProvisionned == false {
+	if vm.AutoProvisionned == false || vm.RunningInstance == nil {
 
 		err = fmt.Errorf(constantes.ErrVMNotProvisionnedByMe, vm.NodeName)
 
@@ -467,7 +465,7 @@ func (vm *AutoScalerServerNode) stopVM() error {
 			glog.Errorf(constantes.ErrKubeCtlIgnoredError, vm.NodeName, err)
 		}
 
-		if err = aws.PowerOff(vm.InstanceID); err == nil {
+		if err = vm.RunningInstance.PowerOff(); err == nil {
 			vm.State = AutoScalerServerNodeStateStopped
 		} else {
 			err = fmt.Errorf(constantes.ErrStopVMFailed, vm.NodeName, err)
@@ -494,13 +492,12 @@ func (vm *AutoScalerServerNode) deleteVM() error {
 	var err error
 	var status *aws.Status
 
-	if vm.AutoProvisionned == false {
+	if vm.AutoProvisionned == false || vm.RunningInstance == nil {
 		err = fmt.Errorf(constantes.ErrVMNotProvisionnedByMe, vm.NodeName)
 	} else {
 		kubeconfig := vm.serverConfig.KubeConfig
-		aws := vm.AwsConfig
 
-		if status, err = aws.Status(vm.InstanceID); err == nil {
+		if status, err = vm.RunningInstance.Status(); err == nil {
 			if status.Powered {
 				args := []string{
 					"kubectl",
@@ -530,16 +527,16 @@ func (vm *AutoScalerServerNode) deleteVM() error {
 					glog.Errorf(constantes.ErrKubeCtlIgnoredError, vm.NodeName, err)
 				}
 
-				if err = aws.PowerOff(vm.InstanceID); err != nil {
+				if err = vm.RunningInstance.PowerOff(); err != nil {
 					err = fmt.Errorf(constantes.ErrStopVMFailed, vm.NodeName, err)
 				} else {
 					vm.State = AutoScalerServerNodeStateStopped
 
-					if err = aws.Delete(vm.InstanceID); err != nil {
+					if err = vm.RunningInstance.Delete(); err != nil {
 						err = fmt.Errorf(constantes.ErrDeleteVMFailed, vm.NodeName, err)
 					}
 				}
-			} else if err = aws.Delete(vm.InstanceID); err != nil {
+			} else if err = vm.RunningInstance.Delete(); err != nil {
 				err = fmt.Errorf(constantes.ErrDeleteVMFailed, vm.NodeName, err)
 			}
 		}
@@ -562,7 +559,7 @@ func (vm *AutoScalerServerNode) statusVM() (AutoScalerServerNodeState, error) {
 	var status *aws.Status
 	var err error
 
-	if status, err = vm.AwsConfig.Status(vm.NodeName); err != nil {
+	if status, err = vm.RunningInstance.Status(); err != nil {
 		glog.Errorf(constantes.ErrGetVMInfoFailed, vm.NodeName, err)
 		return AutoScalerServerNodeStateUndefined, err
 	}
