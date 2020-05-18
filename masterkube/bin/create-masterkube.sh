@@ -408,8 +408,8 @@ MASTER_IP=$(cat ./cluster/manager-ip)
 TOKEN=$(cat ./cluster/token)
 CACERT=$(cat ./cluster/ca.cert)
 
-kubectl annotate node ${MASTERKUBE} "cluster.autoscaler.nodegroup/name=${NODEGROUP_NAME}" "cluster.autoscaler.nodegroup/node-index=0" "cluster.autoscaler.nodegroup/autoprovision=false" "cluster-autoscaler.kubernetes.io/scale-down-disabled=true" --overwrite --kubeconfig=./cluster/config
-kubectl label nodes ${MASTERKUBE} "cluster.autoscaler.nodegroup/name=${NODEGROUP_NAME}" "cluster.autoscaler.nodegroup/instance-id=${LAUNCHED_ID}" "master=true" --overwrite --kubeconfig=./cluster/config
+kubectl annotate node ${MASTERKUBE} "cluster.autoscaler.nodegroup/name=${NODEGROUP_NAME}" "cluster.autoscaler.nodegroup/instance-id=${LAUNCHED_ID}" "cluster.autoscaler.nodegroup/node-index=0" "cluster.autoscaler.nodegroup/autoprovision=false" "cluster-autoscaler.kubernetes.io/scale-down-disabled=true" --overwrite --kubeconfig=./cluster/config
+kubectl label nodes ${MASTERKUBE} "cluster.autoscaler.nodegroup/name=${NODEGROUP_NAME}" "master=true" --overwrite --kubeconfig=./cluster/config
 kubectl create secret tls kube-system -n kube-system --key ./etc/ssl/privkey.pem --cert ./etc/ssl/fullchain.pem --kubeconfig=./cluster/config
 
 kubeconfig-merge.sh ${MASTERKUBE} ./cluster/config
@@ -509,6 +509,7 @@ AUTOSCALER_CONFIG=$(cat <<EOF
             "profile": "${AWS_PROFILE}",
             "region" : "${AWS_REGION}",
             "keyName": "${SSH_KEYNAME}",
+            "ami": "${TARGET_IMAGE_AMI}",
             "iam-role-arn": "${IAM_ROLE_ARN}",
             "timeout": 300,
             "tags": [

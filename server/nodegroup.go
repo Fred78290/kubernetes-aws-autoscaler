@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/Fred78290/kubernetes-aws-autoscaler/aws"
+
 	"github.com/Fred78290/kubernetes-aws-autoscaler/constantes"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/types"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/utils"
@@ -222,6 +224,7 @@ func (g *AutoScalerServerNodeGroup) addNodes(delta int) error {
 
 func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(scaleDownDisabled bool, kubeconfig string) error {
 	var lastNodeIndex = 0
+	var ec2Instance *aws.Ec2Instance
 	var nodeInfos apiv1.NodeList
 	var out string
 	var err error
@@ -249,6 +252,8 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(scaleDownDisabled bool, k
 	g.pendingNodes = make(map[string]*AutoScalerServerNode)
 	g.LastCreatedNodeIndex = 0
 
+	awsConfig := g.configuration.GetAwsConfiguration(g.NodeGroupIdentifier)
+
 	for _, nodeInfo := range nodeInfos.Items {
 		var providerID = utils.GetNodeProviderID(g.ServiceIdentifier, &nodeInfo)
 		var nodeID = ""
@@ -271,67 +276,84 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(scaleDownDisabled bool, k
 						}
 					}
 
-					glog.Infof("Add node:%s with IP:%s to nodegroup:%s", nodeID, runningIP, g.NodeGroupIdentifier)
-
 					if len(nodeInfo.Annotations[constantes.AnnotationNodeIndex]) != 0 {
 						lastNodeIndex, _ = strconv.Atoi(nodeInfo.Annotations[constantes.AnnotationNodeIndex])
 					}
 
 					g.LastCreatedNodeIndex = utils.MaxInt(g.LastCreatedNodeIndex, lastNodeIndex)
 
-					if node == nil {
-						node = &AutoScalerServerNode{
-							ProviderID:       providerID,
-							NodeGroupID:      g.NodeGroupIdentifier,
-							NodeName:         nodeID,
-							NodeIndex:        lastNodeIndex,
-							State:            AutoScalerServerNodeStateRunning,
-							AutoProvisionned: nodeInfo.Annotations[constantes.AnnotationNodeAutoProvisionned] == "true",
-							AwsConfig:        g.configuration.GetAwsConfiguration(g.NodeGroupIdentifier),
-							Addresses: []string{
-								runningIP,
-							},
-							serverConfig: g.configuration,
+					if ec2Instance, err = aws.GetEc2Instance(awsConfig, nodeInfo.Name); err == nil {
+
+						if node == nil {
+							glog.Infof("Add node:%s with IP:%s to nodegroup:%s", nodeID, runningIP, g.NodeGroupIdentifier)
+
+							node = &AutoScalerServerNode{
+								ProviderID:       providerID,
+								NodeGroupID:      g.NodeGroupIdentifier,
+								NodeName:         nodeID,
+								NodeIndex:        lastNodeIndex,
+								State:            AutoScalerServerNodeStateRunning,
+								AutoProvisionned: nodeInfo.Annotations[constantes.AnnotationNodeAutoProvisionned] == "true",
+								AwsConfig:        awsConfig,
+								RunningInstance:  ec2Instance,
+								Addresses: []string{
+									runningIP,
+								},
+								serverConfig: g.configuration,
+							}
+
+							arg = []string{
+								"kubectl",
+								"annotate",
+								"node",
+								nodeInfo.Name,
+								fmt.Sprintf("%s=%s", constantes.AnnotationScaleDownDisabled, strconv.FormatBool(scaleDownDisabled && node.AutoProvisionned == false)),
+								fmt.Sprintf("%s=%s", constantes.AnnotationInstanceID, *ec2Instance.InstanceID),
+								fmt.Sprintf("%s=%s", constantes.AnnotationNodeAutoProvisionned, strconv.FormatBool(node.AutoProvisionned)),
+								fmt.Sprintf("%s=%d", constantes.AnnotationNodeIndex, node.NodeIndex),
+								"--overwrite",
+								"--kubeconfig",
+								kubeconfig,
+							}
+
+							if err := utils.Shell(arg...); err != nil {
+								glog.Errorf(constantes.ErrKubeCtlIgnoredError, nodeInfo.Name, err)
+							}
+
+							arg = []string{
+								"kubectl",
+								"label",
+								"nodes",
+								nodeInfo.Name,
+								fmt.Sprintf("%s=%s", constantes.NodeLabelGroupName, g.NodeGroupIdentifier),
+								"--overwrite",
+								"--kubeconfig",
+								kubeconfig,
+							}
+
+							if err := utils.Shell(arg...); err != nil {
+								glog.Errorf(constantes.ErrKubeCtlIgnoredError, nodeInfo.Name, err)
+							}
+						} else {
+							node.RunningInstance = ec2Instance
+							node.serverConfig = g.configuration
+
+							glog.Infof("Attach existing node:%s with IP:%s to nodegroup:%s", nodeID, runningIP, g.NodeGroupIdentifier)
 						}
 
-						arg = []string{
-							"kubectl",
-							"annotate",
-							"node",
-							nodeInfo.Name,
-							fmt.Sprintf("%s=%s", constantes.AnnotationScaleDownDisabled, strconv.FormatBool(scaleDownDisabled && node.AutoProvisionned == false)),
-							fmt.Sprintf("%s=%s", constantes.AnnotationNodeAutoProvisionned, strconv.FormatBool(node.AutoProvisionned)),
-							fmt.Sprintf("%s=%d", constantes.AnnotationNodeIndex, node.NodeIndex),
-							"--overwrite",
-							"--kubeconfig",
-							kubeconfig,
-						}
+					} else {
+						glog.Errorf("Can not add node:%s with IP:%s to nodegroup:%s, reason: %v", nodeID, runningIP, g.NodeGroupIdentifier, err)
 
-						if err := utils.Shell(arg...); err != nil {
-							glog.Errorf(constantes.ErrKubeCtlIgnoredError, nodeInfo.Name, err)
-						}
-
-						arg = []string{
-							"kubectl",
-							"label",
-							"nodes",
-							nodeInfo.Name,
-							fmt.Sprintf("%s=%s", constantes.NodeLabelGroupName, g.NodeGroupIdentifier),
-							"--overwrite",
-							"--kubeconfig",
-							kubeconfig,
-						}
-
-						if err := utils.Shell(arg...); err != nil {
-							glog.Errorf(constantes.ErrKubeCtlIgnoredError, nodeInfo.Name, err)
-						}
+						node = nil
 					}
 
 					lastNodeIndex++
 
-					g.Nodes[nodeID] = node
+					if node != nil {
+						g.Nodes[nodeID] = node
 
-					node.statusVM()
+						node.statusVM()
+					}
 				}
 			}
 		}

@@ -158,25 +158,42 @@ func Test_statusInstance(t *testing.T) {
 	}
 }
 
-func Test_waitReadyInstance(t *testing.T) {
-	if testFeature("Test_waitReadyInstance") {
+func Test_waitForPowered(t *testing.T) {
+	if testFeature("Test_waitForPowered") {
 		config := loadFromJson(getConfFile())
 
 		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
 			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.InstanceName))
-		} else if status, err := instance.Status(); assert.NoError(t, err, "Can't get status on VM") && status.Powered == false {
-			if status.Powered == true {
-				ipaddr, err := instance.WaitForIP(config)
+		} else if status, err := instance.Status(); assert.NoError(t, err, "Can't get status on VM") && status.Powered {
+			err := instance.WaitForPowered()
 
-				if assert.NoError(t, err, "Can't get IP") {
-					t.Logf("VM powered with IP:%s", *ipaddr)
-				}
-			} else {
-				t.Logf("VM already powered with IP:%s", status.Address)
+			if assert.NoError(t, err, "Can't WaitForPowered") {
+				t.Log("VM powered")
 			}
+		} else {
+			t.Log("VM is not powered")
 		}
 	}
 }
+
+func Test_waitForIP(t *testing.T) {
+	if testFeature("Test_waitForIP") {
+		config := loadFromJson(getConfFile())
+
+		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
+			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.InstanceName))
+		} else if status, err := instance.Status(); assert.NoError(t, err, "Can't get status on VM") && status.Powered {
+			ipaddr, err := instance.WaitForIP(config)
+
+			if assert.NoError(t, err, "Can't get IP") {
+				t.Logf("VM powered with IP:%s", *ipaddr)
+			}
+		} else {
+			t.Log("VM is not powered")
+		}
+	}
+}
+
 func Test_powerOnInstance(t *testing.T) {
 	if testFeature("Test_powerOnInstance") {
 		config := loadFromJson(getConfFile())

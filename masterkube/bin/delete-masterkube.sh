@@ -7,7 +7,7 @@ echo "Delete masterkube previous instance"
 pushd $CURDIR/../
 
 if [ -f ./cluster/config ]; then
-    for INSTANCE_ID in $(kubectl get node -o json --kubeconfig ./cluster/config | jq '.items| .[] | .metadata.labels["cluster.autoscaler.nodegroup/instance-id"]' | tr -d '"')
+    for INSTANCE_ID in $(kubectl get node -o json --kubeconfig ./cluster/config | jq '.items| .[] | .metadata.annotations["cluster.autoscaler.nodegroup/instance-id"]' | tr -d '"')
     do
         echo "Delete Instance ID: $INSTANCE_ID"
         aws ec2 terminate-instances --profile ${AWS_PROFILE} --region ${AWS_REGION} --instance-ids "${INSTANCE_ID}" &>/dev/null

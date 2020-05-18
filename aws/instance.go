@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/golang/glog"
+
 	"github.com/Fred78290/kubernetes-aws-autoscaler/constantes"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -108,8 +110,16 @@ func createClient(conf *Configuration) (*ec2.EC2, error) {
 		return nil, err
 	}
 
+	var client *ec2.EC2
+
 	// Create EC2 service client
-	return ec2.New(sess, aws.NewConfig().WithLogger(conf).WithLogLevel(aws.LogDebugWithHTTPBody).WithLogLevel(aws.LogDebugWithSigning)), nil
+	if glog.V(5) {
+		client = ec2.New(sess, aws.NewConfig().WithLogger(conf).WithLogLevel(aws.LogDebugWithHTTPBody).WithLogLevel(aws.LogDebugWithSigning))
+	} else {
+		client = ec2.New(sess)
+	}
+
+	return client, nil
 }
 
 func (instance *Ec2Instance) getEc2Instance() (*ec2.Instance, error) {
@@ -143,36 +153,40 @@ func (instance *Ec2Instance) NewContext() *Context {
 
 // WaitForIP wait ip a VM by name
 func (instance *Ec2Instance) WaitForIP(callback CallbackCheckIPReady) (*string, error) {
+	var err error
+	var ec2Instance *ec2.Instance
+	var code int64
 
 	timeout := time.Duration(instance.config.Timeout*1000) * time.Millisecond
 
 	for now := time.Now(); time.Since(now) < timeout; time.Sleep(time.Second) {
-		if ec2Instance, err := instance.getEc2Instance(); err != nil {
+
+		if ec2Instance, err = instance.getEc2Instance(); err != nil {
 			return nil, err
-		} else {
-			var code int64 = *ec2Instance.State.Code
+		}
 
-			if code == 16 {
-				var address *string
+		code = *ec2Instance.State.Code
 
-				if instance.config.Network.UsePublicIPAddress {
-					address = ec2Instance.PublicIpAddress
-				} else {
-					address = ec2Instance.PrivateIpAddress
-				}
+		if code == 16 {
+			var address *string
 
-				for t := time.Now(); time.Since(t) < timeout; time.Sleep(time.Second) {
-					if err = callback.CheckIfIPIsReady(instance.InstanceName, *address); err == nil {
-						return address, nil
-					}
-				}
-
-				return address, fmt.Errorf(constantes.ErrWaitIPTimeout, instance.InstanceName, instance.config.Timeout)
+			if instance.config.Network.UsePublicIPAddress {
+				address = ec2Instance.PublicIpAddress
+			} else {
+				address = ec2Instance.PrivateIpAddress
 			}
 
-			if code != 0 {
-				return nil, fmt.Errorf(constantes.ErrWrongStateMachine, *ec2Instance.State.Name, instance.InstanceName)
+			for time.Since(now) < timeout {
+				if err = callback.CheckIfIPIsReady(instance.InstanceName, *address); err == nil {
+					return address, nil
+				}
+
+				time.Sleep(time.Second)
 			}
+
+			return address, fmt.Errorf(constantes.ErrWaitIPTimeout, instance.InstanceName, instance.config.Timeout)
+		} else if code != 0 {
+			return nil, fmt.Errorf(constantes.ErrWrongStateMachine, *ec2Instance.State.Name, instance.InstanceName)
 		}
 	}
 
@@ -209,6 +223,11 @@ func (instance *Ec2Instance) WaitForPowered() error {
 func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType, userData string, disk int) error {
 	var err error
 	var result *ec2.Reservation
+
+	// Check if instance is not already created
+	if _, err = GetEc2Instance(instance.config, instance.InstanceName); err == nil {
+		return fmt.Errorf(constantes.ErrCantCreateVMAlreadyExist, instance.InstanceName)
+	}
 
 	ctx := instance.NewContext()
 	defer ctx.Cancel()

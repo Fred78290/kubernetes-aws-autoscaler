@@ -174,4 +174,7 @@ const (
 
 	// ErrWaitIPTimeout error msg
 	ErrWaitIPTimeout = "Unable to SSH %s after %f seconds"
+
+	// ErrCantCreateVMAlreadyExist error msg
+	ErrCantCreateVMAlreadyExist = "Unable to create VM %s, because another one exists"
 )

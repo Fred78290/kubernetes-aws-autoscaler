@@ -12,6 +12,8 @@ export Test_Sudo=NO
 export Test_getInstanceID=YES
 export Test_createInstance=YES
 export Test_statusInstance=YES
+export Test_waitForPowered=YES
+export Test_waitForIP=YES
 export Test_powerOnInstance=NO
 export Test_powerOffInstance=YES
 export Test_shutdownInstance=YES
@@ -26,7 +28,7 @@ cat > ./aws/$TEST_CONFIG <<EOF
     "profile": "${AWS_PROFILE}",
     "region" : "${AWS_REGION}",
     "keyName": "${SSH_KEYNAME}",
-    "timeout": 300,
+    "timeout": 60,
     "ami": "${SEED_IMAGE}",
     "iam-role-arn": "${IAM_ROLE_ARN}",
     "instanceName": "test-kubernetes-aws-autoscaler",
@@ -49,7 +51,7 @@ cat > ./aws/$TEST_CONFIG <<EOF
         ]
     },
     "ssh": {
-        "user": "~",
+        "user": "$SEED_USER",
         "ssh-private-key": "~/.ssh/id_rsa"
     },
     "cloud-init": {
@@ -60,22 +62,25 @@ cat > ./aws/$TEST_CONFIG <<EOF
 EOF
 
 echo "Run create instance"
-go test --run Test_createInstance -race ./aws
+go test --run Test_createInstance -count 1 -race ./aws
 
 echo "Run get instance"
-go test --run Test_getInstanceID -race ./aws
+go test --run Test_getInstanceID -count 1 -race ./aws
 
 echo "Run status instance"
-go test --run Test_statusInstance -race ./aws
+go test --run Test_statusInstance -count 1 -race ./aws
 
-echo "Run wait ready"
-go test --run Test_waitReadyInstance -race ./aws
+echo "Run wait for started"
+go test --run Test_waitForPowered -count 1 -race ./aws
+
+echo "Run wait for IP"
+go test --run Test_waitForIP -count 1 -race ./aws
 
 #echo "Run power instance"
-#go test --run Test_powerOffInstance -race ./aws
+#go test --run Test_powerOffInstance -count 1 -race ./aws
 
 echo "Run shutdown instance"
-go test --run Test_shutdownInstance -race ./aws
+go test --run Test_shutdownInstance -count 1 -race ./aws
 
 echo "Run test delete instance"
-go test --run Test_deleteInstance -race ./aws
+go test --run Test_deleteInstance -count 1 -race ./aws
