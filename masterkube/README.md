@@ -9,13 +9,13 @@ Ensure that you have sudo right
 You must also install
 
 Linux Plateform
-    govc
+    aws
     libvirt
     python
     python-yaml
 
 Darwin Plateform
-    govc
+    aws
     python
     python-yaml
     gnu-getopt
@@ -51,11 +51,16 @@ During the process the script will create many files located in
 
 | Parameter | Description | Default |
 | --- | --- |--- |
-| `-c\|--no-custom-image` | Use standard image  | NO |
-| `-k\|--ssh-private-key`  |Alternate ssh key file |~/.ssh/id_rsa|
-| `-n\|--cni-version`  |CNI version |0.71
-| `-p\|--password`  |Define the kubernetes user password |randomized|
-| `-v\|--kubernetes-version`  |Which version of kubernetes to use |latest|
+| `-p|--profilee` | AWS Profile to use | $AWS_PROFILE env vars |
+| `-r|--region` | AWS Region to deploy  | $AWS_REGION env vars |
+| `-k|--ssh-private-key`  |Alternate ssh key file |~/.ssh/id_rsa|
+| `-n|--cni-version`  |CNI version |0.71
+| `-v|--kubernetes-version` |Which version of kubernetes to use |latest|
+| `--vpc-id` | VPC ID |
+| `--subnet-id` | Subnet ID to deploy nodesk8s |
+| `--sg-id` | Security group ID|
+| `--default-machine` | The instance type name to deploy  | t3a.medium |
+| `--node-group` | The name of kubernetes node group  | aws-ca-k8s |
 | `--max-nodes-total` | Maximum number of nodes in all node groups. Cluster autoscaler will not grow the cluster beyond this number. | 5 |
 | `--cores-total` | Minimum and maximum number of cores in cluster, in the format < min >:< max >. Cluster autoscaler will not scale the cluster beyond these numbers. | 0:16 |
 | `--memory-total` | Minimum and maximum number of gigabytes of memory in cluster, in the format < min >:< max >. Cluster autoscaler will not scale the cluster beyond these numbers. | 0:24 |
@@ -67,28 +72,17 @@ During the process the script will create many files located in
 | `--scale-down-unneeded-time` | How long a node should be unneeded before it is eligible for scale down | 1 minutes |
 | `--scale-down-unready-time` | How long an unready node should be unneeded before it is eligible for scale down | 1 minutes |
 | `--unremovable-node-recheck-timeout` | The timeout before we check again a node that couldn't be removed before | 1 minutes |
-| `--net-address` | The public IP address | 10.0.0.200 |
-| `--net-gateway` | The public IP gateway | 10.0.0.1 |
-| `--net-dns` | The public IP dns | 10.0.0.1 |
-| `--net-domain` | The public domain name | example.com |
-| `--vm-private-network` | The name of private vSphere network | 'VM Network' |
-| `--vm-public-network` | The name of private vSphere network | 'VM Public' |
-| `--target-image` | The VM name created for cloning with kubernetes | bionic-kubernetes |
-| `--seed-image` | The VM name used to created the targer image | bionic-server-cloudimg-seed |
+| `--target-image` | The AMI used for EC2 instances, only if you create your own image |
+| `--seed-image` | The AMI used to create the target image, region dependant |
 | `--seed-user` | The cloud-init user name | ubuntu |
 
 ```bash
 create-masterkube \
-    --nodegroup=<My Group Name> \
-    --target-image=<My VM template Name> \
-    --seed-image=<My custom VM Template> \
-    --seed-user=<My custom user> \
-    --vm-private-network=<My private network> \
-    --vm-public-network=<My public network> \
-    --net-address="10.0.4.200" \
-    --net-gateway="10.0.4.1" \
-    --net-dns="10.0.4.1" \
-    --net-domain="acme.com"
+    --profile=awsprofile \
+    --region=us-east-1 \
+    --nodegroup=aws-my-k8s \
+    --seed-image=ami-085925f297f89fce1 \
+    --seed-user=ubuntu
 ```
 
 ## Raise autoscaling
