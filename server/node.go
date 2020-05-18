@@ -559,6 +559,10 @@ func (vm *AutoScalerServerNode) statusVM() (AutoScalerServerNodeState, error) {
 	var status *aws.Status
 	var err error
 
+	if vm.RunningInstance == nil {
+		return AutoScalerServerNodeStateNotCreated, nil
+	}
+
 	if status, err = vm.RunningInstance.Status(); err != nil {
 		glog.Errorf(constantes.ErrGetVMInfoFailed, vm.NodeName, err)
 		return AutoScalerServerNodeStateUndefined, err
