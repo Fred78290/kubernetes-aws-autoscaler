@@ -113,7 +113,7 @@ func createClient(conf *Configuration) (*ec2.EC2, error) {
 	var client *ec2.EC2
 
 	// Create EC2 service client
-	if glog.V(5) {
+	if glog.V(6) {
 		client = ec2.New(sess, aws.NewConfig().WithLogger(conf).WithLogLevel(aws.LogDebugWithHTTPBody).WithLogLevel(aws.LogDebugWithSigning))
 	} else {
 		client = ec2.New(sess)
