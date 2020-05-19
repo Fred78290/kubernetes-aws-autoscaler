@@ -552,8 +552,6 @@ create-ingress-controller.sh
 create-dashboard.sh
 create-helloworld.sh
 
-exit
-
 if [ "${LAUNCH_CA}" != "NO" ]; then
     create-autoscaler.sh ${LAUNCH_CA}
 fi
