@@ -170,7 +170,7 @@ func (instance *Ec2Instance) WaitForIP(callback CallbackCheckIPReady) (*string, 
 		if code == 16 {
 			var address *string
 
-			if instance.config.Network.UsePublicIPAddress {
+			if instance.config.Network.AutoScalerUsePublicIPAddress {
 				address = ec2Instance.PublicIpAddress
 			} else {
 				address = ec2Instance.PrivateIpAddress
@@ -284,12 +284,19 @@ func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType, user
 		},
 	}
 
-	if len(instance.config.Network.ENI) > 1 || instance.config.Network.UsePublicIPAddress {
+	if len(instance.config.Network.ENI) > 1 || instance.config.Network.AutoScalerUsePublicIPAddress {
 		interfaces := make([]*ec2.InstanceNetworkInterfaceSpecification, len(instance.config.Network.ENI))
 
 		for index, eni := range instance.config.Network.ENI {
+			var publicIP bool
+
+			if index == 0 && instance.config.Network.AutoScalerUsePublicIPAddress {
+				publicIP = true
+			} else {
+				publicIP = eni.PublicIP
+			}
 			inf := &ec2.InstanceNetworkInterfaceSpecification{
-				AssociatePublicIpAddress: &eni.PublicIP,
+				AssociatePublicIpAddress: aws.Bool(publicIP),
 				DeleteOnTermination:      aws.Bool(true),
 				Description:              aws.String(instance.InstanceName),
 				DeviceIndex:              aws.Int64(int64(index)),
@@ -419,9 +426,11 @@ func (instance *Ec2Instance) Status() (*Status, error) {
 		code := ec2Instance.State.Code
 
 		if code == nil || *code == 48 {
+			glog.V(4).Infof("Status: instance %s id (%s) is terminated", instance.InstanceName, instance.InstanceID)
+
 			return nil, fmt.Errorf("EC2 Instance %s is terminated", instance.InstanceName)
 		} else if *code == 16 || *code == 0 {
-			if instance.config.Network.UsePublicIPAddress {
+			if instance.config.Network.AutoScalerUsePublicIPAddress {
 				address = ec2Instance.PublicIpAddress
 			} else {
 				address = ec2Instance.PrivateIpAddress

@@ -47,9 +47,16 @@ export VPC_SUBNET_ID="<to be filled>"
 export VPC_SECURITY_GROUPID="<to be filled>"
 export VPC_USE_PUBLICIP=true
 
-export LAUNCH_CA=NO
+export LAUNCH_CA=YES
 
 source ${CURDIR}/aws.defs
+
+# Use public IP address only if we run autoscaler outside AWS
+if [ "${LAUNCH_CA}" != "YES" ]; then
+    export AUTOSCALER_USE_PUBLICIP=true
+else
+    export AUTOSCALER_USE_PUBLICIP=false
+fi
 
 SSH_OPTIONS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
 
@@ -519,7 +526,7 @@ AUTOSCALER_CONFIG=$(cat <<EOF
                 }
             ],
             "network": {
-                "usePublicIP": ${VPC_USE_PUBLICIP},
+                "autoScalerUsePublicIP": ${AUTOSCALER_USE_PUBLICIP},
                 "eni": [
                     {
                         "subnet": "${VPC_SUBNET_ID}",
