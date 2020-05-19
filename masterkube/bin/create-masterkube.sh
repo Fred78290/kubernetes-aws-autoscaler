@@ -511,7 +511,7 @@ AUTOSCALER_CONFIG=$(cat <<EOF
             "keyName": "${SSH_KEYNAME}",
             "ami": "${TARGET_IMAGE_AMI}",
             "iam-role-arn": "${IAM_ROLE_ARN}",
-            "timeout": 300,
+            "timeout": 120,
             "tags": [
                 {
                     "key": "CustomTag",
