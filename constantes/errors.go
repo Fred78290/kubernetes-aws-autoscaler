@@ -167,7 +167,7 @@ const (
 	ErrRsyncError = "Can't rsync folder for VM: %s, %s, reason: %v"
 
 	// WarnFailedVMNotDeleted warn msg
-	WarnFailedVMNotDeleted = "The failed VM:%s is not deleted because status is:%V"
+	WarnFailedVMNotDeleted = "The failed VM:%s is not deleted because status is:%s"
 
 	// ErrWrongStateMachine error msg
 	ErrWrongStateMachine = "Unexpected instance state %s for instance %s, expected prending or running"
