@@ -2,7 +2,7 @@
 
 set -e
 
-KUBERNETES_VERSION=$(curl -sSL https://dl.k8s.io/release/stable.txt)
+KUBERNETES_VERSION=v1.15.11
 CNI_VERSION=v0.8.5
 SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
 CACHE=~/.local/aws/cache
