@@ -122,6 +122,14 @@ func createClient(conf *Configuration) (*ec2.EC2, error) {
 	return client, nil
 }
 
+func (instance *Ec2Instance) getInstanceID() string {
+	if instance.InstanceID == nil {
+		return "<UNDEFINED>"
+	} else {
+		return *instance.InstanceID
+	}
+}
+
 func (instance *Ec2Instance) getEc2Instance() (*ec2.Instance, error) {
 	var err error
 	var result *ec2.DescribeInstancesOutput
@@ -157,6 +165,8 @@ func (instance *Ec2Instance) WaitForIP(callback CallbackCheckIPReady) (*string, 
 	var ec2Instance *ec2.Instance
 	var code int64
 
+	glog.V(4).Infof("WaitForIP: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
+
 	timeout := time.Duration(instance.config.Timeout*1000) * time.Millisecond
 
 	for now := time.Now(); time.Since(now) < timeout; time.Sleep(time.Second) {
@@ -175,6 +185,8 @@ func (instance *Ec2Instance) WaitForIP(callback CallbackCheckIPReady) (*string, 
 			} else {
 				address = ec2Instance.PrivateIpAddress
 			}
+
+			glog.V(4).Infof("WaitForIP: instance %s id (%s), using IP:%s", instance.InstanceName, instance.getInstanceID(), *address)
 
 			for time.Since(now) < timeout {
 				if err = callback.CheckIfIPIsReady(instance.InstanceName, *address); err == nil {
@@ -196,13 +208,13 @@ func (instance *Ec2Instance) WaitForIP(callback CallbackCheckIPReady) (*string, 
 // WaitForPowered wait ip a VM by name
 func (instance *Ec2Instance) WaitForPowered() error {
 
-	glog.V(4).Infof("WaitForPowered: instance %s id (%s)", instance.InstanceName, instance.InstanceID)
+	glog.V(4).Infof("WaitForPowered: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
 
 	timeout := time.Duration(instance.config.Timeout*1000) * time.Millisecond
 
 	for now := time.Now(); time.Since(now) < timeout; time.Sleep(time.Second) {
 		if ec2Instance, err := instance.getEc2Instance(); err != nil {
-			glog.V(4).Infof("WaitForPowered: instance %s id (%s), got an error %v", instance.InstanceName, instance.InstanceID, err)
+			glog.V(4).Infof("WaitForPowered: instance %s id (%s), got an error %v", instance.InstanceName, instance.getInstanceID(), err)
 
 			return err
 		} else {
@@ -210,12 +222,12 @@ func (instance *Ec2Instance) WaitForPowered() error {
 			var code int64 = *ec2Instance.State.Code
 
 			if code == 16 {
-				glog.V(4).Infof("WaitForPowered: ready instance %s id (%s)", instance.InstanceName, instance.InstanceID)
+				glog.V(4).Infof("WaitForPowered: ready instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
 				return nil
 			}
 
 			if code != 0 {
-				glog.V(4).Infof("WaitForPowered: instance %s id (%s), unexpected state: %d", instance.InstanceName, instance.InstanceID, code)
+				glog.V(4).Infof("WaitForPowered: instance %s id (%s), unexpected state: %d", instance.InstanceName, instance.getInstanceID(), code)
 
 				return fmt.Errorf(constantes.ErrWrongStateMachine, *ec2Instance.State.Name, instance.InstanceName)
 			}
@@ -231,8 +243,12 @@ func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType, user
 	var err error
 	var result *ec2.Reservation
 
+	glog.V(4).Infof("Create: instance name %s in node group %s", instance.InstanceName, nodeGroup)
+
 	// Check if instance is not already created
 	if _, err = GetEc2Instance(instance.config, instance.InstanceName); err == nil {
+		glog.V(4).Infof("Create: instance name %s already exists", instance.InstanceName)
+
 		return fmt.Errorf(constantes.ErrCantCreateVMAlreadyExist, instance.InstanceName)
 	}
 
@@ -346,7 +362,7 @@ func (instance *Ec2Instance) Delete() error {
 	ctx := instance.NewContext()
 	defer ctx.Cancel()
 
-	glog.V(4).Infof("Delete: instance %s id (%s)", instance.InstanceName, instance.InstanceID)
+	glog.V(4).Infof("Delete: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
 
 	input := &ec2.TerminateInstancesInput{
 		InstanceIds: []*string{
@@ -366,7 +382,7 @@ func (instance *Ec2Instance) PowerOn() error {
 	ctx := instance.NewContext()
 	defer ctx.Cancel()
 
-	glog.V(4).Infof("PowerOn: instance %s id (%s)", instance.InstanceName, instance.InstanceID)
+	glog.V(4).Infof("PowerOn: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
 
 	input := &ec2.StartInstancesInput{
 		InstanceIds: []*string{
@@ -385,7 +401,7 @@ func (instance *Ec2Instance) powerOff(force bool) error {
 	ctx := instance.NewContext()
 	defer ctx.Cancel()
 
-	glog.V(4).Infof("powerOff: instance %s id (%s)", instance.InstanceName, instance.InstanceID)
+	glog.V(4).Infof("powerOff: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
 
 	input := &ec2.StopInstancesInput{
 		Force: &force,
@@ -395,7 +411,7 @@ func (instance *Ec2Instance) powerOff(force bool) error {
 	}
 
 	if _, err := instance.client.StopInstancesWithContext(ctx, input); err != nil {
-		glog.V(4).Infof("powerOff: instance %s id (%s), got error %v", instance.InstanceName, instance.InstanceID, err)
+		glog.V(4).Infof("powerOff: instance %s id (%s), got error %v", instance.InstanceName, instance.getInstanceID(), err)
 		return err
 	}
 
@@ -415,7 +431,7 @@ func (instance *Ec2Instance) ShutdownGuest() error {
 // Status return the current status of VM by name
 func (instance *Ec2Instance) Status() (*Status, error) {
 
-	glog.V(4).Infof("Status: instance %s id (%s)", instance.InstanceName, instance.InstanceID)
+	glog.V(4).Infof("Status: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
 
 	if ec2Instance, err := instance.getEc2Instance(); err != nil {
 		return nil, err
@@ -426,7 +442,7 @@ func (instance *Ec2Instance) Status() (*Status, error) {
 		code := ec2Instance.State.Code
 
 		if code == nil || *code == 48 {
-			glog.V(4).Infof("Status: instance %s id (%s) is terminated", instance.InstanceName, instance.InstanceID)
+			glog.V(4).Infof("Status: instance %s id (%s) is terminated", instance.InstanceName, instance.getInstanceID())
 
 			return nil, fmt.Errorf("EC2 Instance %s is terminated", instance.InstanceName)
 		} else if *code == 16 || *code == 0 {
