@@ -145,6 +145,8 @@ func (g *AutoScalerServerNodeGroup) deleteNodes(delta int) error {
 }
 
 func (g *AutoScalerServerNodeGroup) addNodes(delta int) error {
+	var err error
+
 	glog.V(5).Infof("AutoScalerServerNodeGroup::addNodes, nodeGroupID:%s", g.NodeGroupIdentifier)
 
 	tempNodes := make([]*AutoScalerServerNode, 0, delta)
@@ -187,39 +189,96 @@ func (g *AutoScalerServerNodeGroup) addNodes(delta int) error {
 		}
 	}
 
-	for _, node := range tempNodes {
-		if g.Status != NodegroupCreated {
-			glog.V(5).Infof("AutoScalerServerNodeGroup::addNodes, nodeGroupID:%s -> g.status != nodegroupCreated", g.NodeGroupIdentifier)
-			break
+	numberOfPendingNodes := len(tempNodes)
+
+	if g.Status != NodegroupCreated {
+		glog.V(5).Infof("AutoScalerServerNodeGroup::addNodes, nodeGroupID:%s -> g.status != nodegroupCreated", g.NodeGroupIdentifier)
+	} else if numberOfPendingNodes > 1 {
+
+		// WaitGroup
+		wg := sync.WaitGroup{}
+
+		// Number of nodes to launc
+		wg.Add(numberOfPendingNodes)
+
+		type ReturnValue struct {
+			node *AutoScalerServerNode
+			err  error
 		}
 
-		if err := node.launchVM(g.NodeLabels, g.SystemLabels); err != nil {
-			glog.Errorf(constantes.ErrUnableToLaunchVM, node.NodeName, err)
+		// NodeGroup stopped error
+		ngNotRunningErr := fmt.Errorf("Nodegroup %s not running", g.NodeGroupIdentifier)
 
-			for _, node := range tempNodes {
-				delete(g.pendingNodes, node.NodeName)
+		// Collect returned error
+		returns := make([]ReturnValue, numberOfPendingNodes)
 
-				if status, _ := node.statusVM(); status != AutoScalerServerNodeStateNotCreated {
-					if e := node.deleteVM(); e != nil {
-						glog.Errorf(constantes.ErrUnableToDeleteVM, node.NodeName, e)
-					}
-				} else {
-					glog.Warningf(constantes.WarnFailedVMNotDeleted, node.NodeName, status)
-				}
-
-				g.pendingNodesWG.Done()
+		// Launch wrapper
+		nodeLauncher := func(index int, node *AutoScalerServerNode) {
+			returnValue := ReturnValue{
+				node: node,
 			}
 
-			return err
+			returns[index] = returnValue
+
+			// Check if NG still running
+			if g.Status == NodegroupCreated {
+				go func() {
+					returnValue.err = node.launchVM(g.NodeLabels, g.SystemLabels)
+
+					// Remove from pending
+					delete(g.pendingNodes, node.NodeName)
+
+					if returnValue.err != nil {
+						node.cleanOnLaunchError(returnValue.err)
+					} else {
+						// Add node to running nodes
+						g.Nodes[node.NodeName] = node
+					}
+
+					// Pending node effective removed
+					g.pendingNodesWG.Done()
+
+					// Notify it's done
+					wg.Done()
+				}()
+			} else {
+				returnValue.err = ngNotRunningErr
+			}
 		}
+
+		// Launch each node in background
+		for nodeIndex, node := range tempNodes {
+			nodeLauncher(nodeIndex, node)
+		}
+
+		// Wait all launched ended
+		wg.Wait()
+
+		// Analyse returns the first occured error
+		for _, result := range returns {
+
+			if result.err == ngNotRunningErr {
+				glog.V(4).Info("Ignore ng not running error")
+			} else if result.err != nil {
+				err = result.err
+				break
+			}
+		}
+	} else {
+		node := tempNodes[0]
 
 		delete(g.pendingNodes, node.NodeName)
 
-		g.Nodes[node.NodeName] = node
+		if err = node.launchVM(g.NodeLabels, g.SystemLabels); err != nil {
+			node.cleanOnLaunchError(err)
+		} else {
+			g.Nodes[node.NodeName] = node
+		}
+
 		g.pendingNodesWG.Done()
 	}
 
-	return nil
+	return err
 }
 
 func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(scaleDownDisabled bool, kubeconfig string) error {
