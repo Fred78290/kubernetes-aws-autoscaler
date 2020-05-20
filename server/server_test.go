@@ -18,8 +18,8 @@ import (
 
 const (
 	testProviderID = "aws"
-	testGroupID    = "afp-slyo-ca-k8s"
-	testNodeName   = "afp-slyo-ca-k8s-vm-00"
+	testGroupID    = "aws-ca-k8s"
+	testNodeName   = "aws-ca-k8s-vm-01"
 )
 
 func newTestServer(addNodeGroup, addTestNode bool) (*AutoScalerServerApp, *AutoScalerServerNodeGroup, context.Context, error) {
