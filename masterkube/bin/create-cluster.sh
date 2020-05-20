@@ -4,7 +4,7 @@ set -e
 
 CNI=flannel
 NET_IF=$(ip route get 1|awk '{print $5;exit}')
-KUBERNETES_VERSION=v1.18.2
+KUBERNETES_VERSION=v1.16.9
 CLUSTER_DIR=/etc/cluster
 SCHEME="aws"
 NODEGROUP_NAME="aws-ca-k8s"

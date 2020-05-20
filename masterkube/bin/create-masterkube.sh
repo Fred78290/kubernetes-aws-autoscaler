@@ -15,7 +15,7 @@ export MASTERKUBE="${NODEGROUP_NAME}-masterkube"
 export PROVIDERID="${SCHEME}://${NODEGROUP_NAME}/object?type=node&name=${MASTERKUBE}"
 export SSH_PRIVATE_KEY=~/.ssh/id_rsa
 export SSH_KEY=$(cat "${SSH_PRIVATE_KEY}.pub")
-export KUBERNETES_VERSION=v1.18.2
+export KUBERNETES_VERSION=v1.16.9
 export KUBECONFIG=${HOME}/.kube/config
 export ROOT_IMG_NAME=bionic-kubernetes
 export TARGET_IMAGE="${ROOT_IMG_NAME}-${KUBERNETES_VERSION}"
