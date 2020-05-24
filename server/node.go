@@ -77,7 +77,7 @@ func (vm *AutoScalerServerNode) prepareKubelet() (string, error) {
 	kubeletDefault := []string{
 		"#!/bin/bash",
 		". /etc/default/kubelet",
-		fmt.Sprintf("echo \"KUBELET_EXTRA_ARGS=\\\"$KUBELET_EXTRA_ARGS --provider-id=%s\\\"\" > /etc/default/kubelet", vm.ProviderID),
+		fmt.Sprintf("echo \"KUBELET_EXTRA_ARGS=\\\"$KUBELET_EXTRA_ARGS --node-ip-id=%s --provider-id=%s\\\"\" > /etc/default/kubelet", vm.Addresses, vm.ProviderID),
 		"systemctl restart kubelet",
 	}
 

@@ -346,7 +346,7 @@ LAUNCHED_INSTANCE=$(aws ec2 run-instances \
     --user-data "file://config/userdata.yaml" \
     --iam-instance-profile "Arn=${IAM_ROLE_ARN}" \
     --block-device-mappings "file://config/mapping.json" \
-    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${MASTERKUBE}},{Key=NodeGroup,Value=${NODEGROUP_NAME}}]" \
+    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${MASTERKUBE}},{Key=NodeGroup,Value=${NODEGROUP_NAME}},{Key=kubernetes.io/cluster/${NODEGROUP_NAME},Value=owned},{Key=KubernetesCluster,Value=${NODEGROUP_NAME}]" \
     ${PUBLIC_IP_OPTIONS})
 
 LAUNCHED_ID=$(echo ${LAUNCHED_INSTANCE} | jq '.Instances[0].InstanceId' | tr -d '"' | sed -e 's/null//g')
@@ -372,11 +372,11 @@ LAUNCHED_INSTANCE=$(aws ec2  describe-instances --profile ${AWS_PROFILE} --regio
 
 if [ "${VPC_USE_PUBLICIP}" == "true" ]; then
     export IPADDR=$(echo ${LAUNCHED_INSTANCE} | jq '.PublicIpAddress' | tr -d '"' | sed -e 's/null//g')
-    CERT_EXTRA_SANS="--cert-extra-sans ${IPADDR},${MASTERKUBE}.${DOMAIN_NAME},masterkube.${DOMAIN_NAME} masterkube-dashboard.${DOMAIN_NAME}"
+    CERT_EXTRA_SANS="--cert-extra-sans ${IPADDR},${MASTERKUBE}.${DOMAIN_NAME},masterkube.${DOMAIN_NAME},masterkube-dashboard.${DOMAIN_NAME}"
     IP_TYPE="public"
 else
     export IPADDR=$(echo ${LAUNCHED_INSTANCE} | jq '.PrivateIpAddress' | tr -d '"' | sed -e 's/null//g')
-    CERT_EXTRA_SANS="--cert-extra-sans ${MASTERKUBE}.${DOMAIN_NAME},masterkube.${DOMAIN_NAME} masterkube-dashboard.${DOMAIN_NAME}"
+    CERT_EXTRA_SANS="--cert-extra-sans ${MASTERKUBE}.${DOMAIN_NAME},masterkube.${DOMAIN_NAME},masterkube-dashboard.${DOMAIN_NAME}"
     IP_TYPE="private"
 fi
 
@@ -396,7 +396,7 @@ scp ${SSH_OPTIONS} -r ../masterkube ${SEED_USER}@${IPADDR}:~
 
 echo "Start kubernetes ${MASTERKUBE} instance master node, kubernetes version=${KUBERNETES_VERSION}, providerID=${PROVIDERID}"
 ssh ${SSH_OPTIONS} ${SEED_USER}@${IPADDR} sudo cp /home/${SEED_USER}/masterkube/bin/* /usr/local/bin
-ssh ${SSH_OPTIONS} ${SEED_USER}@${IPADDR} sudo create-cluster.sh --cni flannel --kubernetes-version "${KUBERNETES_VERSION}"  ${CERT_EXTRA_SANS} --provider-id "\'${PROVIDERID}\'"
+ssh ${SSH_OPTIONS} ${SEED_USER}@${IPADDR} sudo create-cluster.sh --cni-plugin $CNI_PLUGIN --kubernetes-version "${KUBERNETES_VERSION}" --node-group "${NODEGROUP_NAME}" ${CERT_EXTRA_SANS}
 
 scp ${SSH_OPTIONS} ${SEED_USER}@${IPADDR}:/etc/cluster/* ./cluster
 
