@@ -73,11 +73,12 @@ func (vm *AutoScalerServerNode) prepareKubelet() (string, error) {
 	var out string
 	var err error
 	var fName = fmt.Sprintf("/tmp/set-kubelet-default-%s.sh", vm.NodeName)
+	var address = vm.Addresses[0]
 
 	kubeletDefault := []string{
 		"#!/bin/bash",
 		". /etc/default/kubelet",
-		fmt.Sprintf("echo \"KUBELET_EXTRA_ARGS=\\\"$KUBELET_EXTRA_ARGS --node-ip-id=%s --provider-id=%s\\\"\" > /etc/default/kubelet", vm.Addresses, vm.ProviderID),
+		fmt.Sprintf("echo \"KUBELET_EXTRA_ARGS=\\\"$KUBELET_EXTRA_ARGS --node-ip=%s --provider-id=%s\\\"\" > /etc/default/kubelet", address, vm.ProviderID),
 		"systemctl restart kubelet",
 	}
 
@@ -87,14 +88,14 @@ func (vm *AutoScalerServerNode) prepareKubelet() (string, error) {
 
 	defer os.Remove(fName)
 
-	if err = utils.Scp(vm.serverConfig.SSH, vm.Addresses[0], fName, fName); err != nil {
-		glog.Errorf("Unable to scp node %s address:%s, reason:%s", vm.Addresses[0], vm.NodeName, err)
+	if err = utils.Scp(vm.serverConfig.SSH, address, fName, fName); err != nil {
+		glog.Errorf("Unable to scp node %s address:%s, reason:%s", address, vm.NodeName, err)
 
 		return out, err
 	}
 
-	if out, err = utils.Sudo(vm.serverConfig.SSH, vm.Addresses[0], vm.AwsConfig.Timeout, fmt.Sprintf("bash %s", fName)); err != nil {
-		glog.Errorf("Unable to ssh node %s address:%s, reason:%s", vm.Addresses[0], vm.NodeName, err)
+	if out, err = utils.Sudo(vm.serverConfig.SSH, address, vm.AwsConfig.Timeout, fmt.Sprintf("bash %s", fName)); err != nil {
+		glog.Errorf("Unable to ssh node %s address:%s, reason:%s", address, vm.NodeName, err)
 
 		return out, err
 	}
