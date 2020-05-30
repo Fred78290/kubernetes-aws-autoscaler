@@ -4,13 +4,14 @@ set -e
 
 KUBERNETES_VERSION=v1.15.11
 CNI_VERSION=v0.8.5
+CNI_PLUGIN=flannel
 SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
 CACHE=~/.local/aws/cache
-TARGET_IMAGE=bionic-kubernetes-$KUBERNETES_VERSION
+TARGET_IMAGE="bionic-kubernetes-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}"
 OSDISTRO=$(uname -s)
 SSH_KEYNAME="aws-k8s-key"
 CURDIR=$(dirname $0)
-
+FORCE=NO
 SEED_USER=ubuntu
 SEED_IMAGE="<to be filled>"
 VPC_ID="<to be filled>"
@@ -31,22 +32,26 @@ fi
 
 mkdir -p $CACHE
 
-TEMP=`getopt -o i:k:n:op:s:u:v: --long profile:,region:,vpc-id:,subnet-id:,sg-id:,use-public-ip:,user:,ami:,custom-image:,ssh-key:,ssh-key-name:,cni-version:,kubernetes-version: -n "$0" -- "$@"`
+TEMP=`getopt -o fc:i:k:n:op:s:u:v: --long ecr-password:,force,profile:,region:,vpc-id:,subnet-id:,sg-id:,use-public-ip:,user:,ami:,custom-image:,ssh-key:,ssh-key-name:,cni-plugin:,cni-version:,kubernetes-version: -n "$0" -- "$@"`
 eval set -- "$TEMP"
 
 # extract options and their arguments into variables.
 while true ; do
 	#echo "1:$1"
     case "$1" in
+        -f|--force) FORCE=YES ; shift;;
+
         -p|--profile) AWS_PROFILE="${2}" ; shift 2;;
         -r|--region) AWS_REGION="${2}" ; shift 2;;
         -i|--custom-image) TARGET_IMAGE="$2" ; shift 2;;
         -k|--ssh-key) SSH_KEY=$2 ; shift 2;;
-        -n|--cni-version) CNI_VERSION=$2 ; shift 2;;
+        -i|--cni-version) CNI_VERSION=$2 ; shift 2;;
+        -c|--cni-plugin) CNI_PLUGIN=$2 ; shift 2;;
         -u|--user) SEED_USER=$2 ; shift 2;;
         -v|--kubernetes-version) KUBERNETES_VERSION=$2 ; shift 2;;
 
         --ami) SEED_IMAGE=$2 ; shift 2;;
+        --ecr-password) ECR_PASSWORD=$2 ; shift 2;;
         --ssh-key-name) SSH_KEY_NAME=$2 ; shift 2;;
         --vpc-id) VC_NETWORK_PUBLIC="${2}" ; shift 2;;
         --subnet-id) VPC_SUBNET_ID="${2}" ; shift 2;;
@@ -63,8 +68,11 @@ SOURCE_IMAGE_ID=$(aws ec2 describe-images --profile ${AWS_PROFILE} --region ${AW
 KEYEXISTS=$(aws ec2 describe-key-pairs --profile ${AWS_PROFILE} --region ${AWS_REGION} --key-names "${SSH_KEYNAME}" 2>/dev/null | jq  '.KeyPairs[].KeyName' | tr -d '"')
 
 if [ ! -z "${TARGET_IMAGE_ID}" ]; then
-    echo "$TARGET_IMAGE already exists!"
-    exit 0
+    if [ $FORCE = NO ]; then
+        echo "$TARGET_IMAGE already exists!"
+        exit 0
+    fi
+    aws ec2 deregister-image --profile ${AWS_PROFILE} --region ${AWS_REGION} --image-id "${TARGET_IMAGE_ID}" &>/dev/null
 fi
 
 if [ -z "${SOURCE_IMAGE_ID}" ]; then
@@ -101,6 +109,24 @@ EOF
 
 cat > "${CACHE}/prepare-image.sh" <<EOF
 #!/bin/bash
+CNI_VERSION=${CNI_VERSION}
+CNI_PLUGIN=${CNI_PLUGIN}
+KUBERNETES_VERSION=${KUBERNETES_VERSION}
+KUBERNETES_MINOR_RELEASE=${KUBERNETES_MINOR_RELEASE}
+ECR_PASSWORD=${ECR_PASSWORD}
+EOF
+
+cat >> "${CACHE}/prepare-image.sh" <<"EOF"
+
+function pull_image() {
+    DOCKER_IMAGES=$(curl -s $1 | grep "image: " | sed -E 's/.+image: (.+)/\1/g')
+
+    for DOCKER_IMAGE in $DOCKER_IMAGES
+    do
+        echo "Pull image $DOCKER_IMAGE"
+        docker pull $DOCKER_IMAGE
+    done
+}
 
 apt-get update
 apt-get upgrade -y
@@ -176,22 +202,49 @@ EnvironmentFile=-/var/lib/kubelet/kubeadm-flags.env
 # the .NodeRegistration.KubeletExtraArgs object in the configuration files instead. KUBELET_EXTRA_ARGS should be sourced from this file.
 EnvironmentFile=-/etc/default/kubelet
 ExecStart=
-ExecStart=/usr/local/bin/kubelet \$KUBELET_KUBECONFIG_ARGS \$KUBELET_CONFIG_ARGS \$KUBELET_KUBEADM_ARGS \$KUBELET_EXTRA_ARGS
+ExecStart=/usr/local/bin/kubelet $KUBELET_KUBECONFIG_ARGS $KUBELET_CONFIG_ARGS $KUBELET_KUBEADM_ARGS $KUBELET_EXTRA_ARGS
 SHELL
 
-echo 'KUBELET_EXTRA_ARGS="--fail-swap-on=false --read-only-port=10255 --feature-gates=VolumeSubpathEnvExpansion=true"' > /etc/default/kubelet
+#echo 'KUBELET_EXTRA_ARGS="--network-plugin=cni --fail-swap-on=false --read-only-port=10255 --feature-gates=VolumeSubpathEnvExpansion=true"' > /etc/default/kubelet
+echo 'KUBELET_EXTRA_ARGS=' > /etc/default/kubelet
 
-echo 'export PATH=/opt/cni/bin:\$PATH' >> /etc/profile.d/apps-bin-path.sh
+echo 'export PATH=/opt/cni/bin:$PATH' >> /etc/profile.d/apps-bin-path.sh
 
 systemctl enable kubelet
 systemctl restart kubelet
 
 usermod -aG docker ubuntu
 
-modprobe br_netfilter
-echo "net.bridge.bridge-nf-call-iptables = 1" >> /etc/sysctl.conf
+if [ "$CNI_PLUGIN" != "aws" ]; then
+    modprobe br_netfilter
+
+    echo "net.bridge.bridge-nf-call-ip6tables = 1" >> /etc/sysctl.conf
+    echo "net.bridge.bridge-nf-call-iptables = 1" >> /etc/sysctl.conf
+    echo "net.bridge.bridge-nf-call-arptables = 1" >> /etc/sysctl.conf
+
+    echo "br_netfilter" >> /etc/modules
+fi
 
 /usr/local/bin/kubeadm config images pull --kubernetes-version=${KUBERNETES_VERSION}
+
+if [ "$CNI_PLUGIN" = "aws" ]; then
+    docker login -u AWS -p "$ECR_PASSWORD" "602401143452.dkr.ecr.us-west-2.amazonaws.com"
+    pull_image https://raw.githubusercontent.com/aws/amazon-vpc-cni-k8s/release-1.6.2/config/v1.6/aws-k8s-cni.yaml
+elif [ "$CNI_PLUGIN" = "calico" ]; then
+    pull_image https://docs.projectcalico.org/manifests/calico-vxlan.yaml 2>&1
+elif [ "$CNI_PLUGIN" = "flannel" ]; then
+    pull_image https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml 2>&1
+elif [ "$CNI_PLUGIN" = "weave" ]; then
+    pull_image "https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')"
+elif [ "$CNI_PLUGIN" = "canal" ]; then
+    pull_image https://raw.githubusercontent.com/projectcalico/canal/master/k8s-install/1.7/rbac.yaml 2>&1
+    pull_image https://raw.githubusercontent.com/projectcalico/canal/master/k8s-install/1.7/canal.yaml 2>&1
+elif [ "$CNI_PLUGIN" = "kube" ]; then
+    pull_image https://raw.githubusercontent.com/cloudnativelabs/kube-router/master/daemonset/kubeadm-kuberouter.yaml
+    pull_image https://raw.githubusercontent.com/cloudnativelabs/kube-router/master/daemonset/kubeadm-kuberouter-all-features.yaml
+elif [ "$CNI_PLUGIN" = "romana" ]; then
+    pull_image https://raw.githubusercontent.com/romana/romana/master/containerize/specs/romana-kubeadm.yml
+fi
 
 [ -f /etc/cloud/cloud.cfg.d/50-curtin-networking.cfg ] && rm /etc/cloud/cloud.cfg.d/50-curtin-networking.cfg
 rm /etc/netplan/*
@@ -263,6 +316,7 @@ done
 echo
 
 ssh ${SSH_OPTIONS} -t "${SEED_USER}@${IPADDR}" sudo ./prepare-image.sh
+ssh ${SSH_OPTIONS} -t "${SEED_USER}@${IPADDR}" rm ./prepare-image.sh
 
 aws ec2 stop-instances --profile ${AWS_PROFILE} --region ${AWS_REGION} --instance-ids "${LAUNCHED_ID}" &> /dev/null
 
@@ -291,6 +345,6 @@ do
 done
 echo
 
-aws ec2 terminate-instances --profile ${AWS_PROFILE} --region ${AWS_REGION} --instance-ids "${LAUNCHED_ID}"
+aws ec2 terminate-instances --profile ${AWS_PROFILE} --region ${AWS_REGION} --instance-ids "${LAUNCHED_ID}" &>/dev/null
 
 exit 0
