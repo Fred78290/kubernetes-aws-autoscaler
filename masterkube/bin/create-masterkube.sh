@@ -18,8 +18,9 @@ export SSH_KEY=$(cat "${SSH_PRIVATE_KEY}.pub")
 export KUBERNETES_VERSION=v1.18.2
 export KUBECONFIG=${HOME}/.kube/config
 export ROOT_IMG_NAME=bionic-kubernetes
-export TARGET_IMAGE="${ROOT_IMG_NAME}-${KUBERNETES_VERSION}"
 export CNI_VERSION="v0.8.5"
+export CNI_PLUGIN=calico
+export TARGET_IMAGE="${ROOT_IMG_NAME}-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}"
 export MINNODES=0
 export MAXNODES=5
 export MAXTOTALNODES=${MAXNODES}
@@ -93,7 +94,6 @@ while true; do
 
     --target-image)
         ROOT_IMG_NAME="$2"
-        TARGET_IMAGE="${ROOT_IMG_NAME}-${KUBERNETES_VERSION}"
         shift 2
         ;;
 
@@ -140,7 +140,6 @@ while true; do
         ;;
     -k | --kubernetes-version)
         KUBERNETES_VERSION="$2"
-        TARGET_IMAGE="${ROOT_IMG_NAME}-${KUBERNETES_VERSION}"
         shift 2
         ;;
 
@@ -200,7 +199,9 @@ while true; do
     esac
 done
 
+TARGET_IMAGE="${ROOT_IMG_NAME}-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}"
 KEYEXISTS=$(aws ec2 describe-key-pairs --profile ${AWS_PROFILE} --region ${AWS_REGION} --key-names "${SSH_KEYNAME}" | jq  '.KeyPairs[].KeyName' | tr -d '"')
+ECR_PASSWORD=$(aws ecr get-login-password  --profile ${AWS_PROFILE} --region us-west-2)
 
 if [ -z ${KEYEXISTS} ]; then
     echo "SSH Public key doesn't exist"
@@ -278,6 +279,8 @@ if [ -z "${TARGET_IMAGE_AMI}" ]; then
         --profile="${AWS_PROFILE}" \
         --region="${AWS_REGION}" \
         --cni-version="${CNI_VERSION}" \
+        --cni-plugin="${CNI_PLUGIN}" \
+        --ecr-password="${ECR_PASSWORD}" \
         --custom-image="${TARGET_IMAGE}" \
         --kubernetes-version="${KUBERNETES_VERSION}" \
         --ami="${SEED_IMAGE}" \
@@ -346,7 +349,7 @@ LAUNCHED_INSTANCE=$(aws ec2 run-instances \
     --user-data "file://config/userdata.yaml" \
     --iam-instance-profile "Arn=${IAM_ROLE_ARN}" \
     --block-device-mappings "file://config/mapping.json" \
-    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${MASTERKUBE}},{Key=NodeGroup,Value=${NODEGROUP_NAME}}]" \
+    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${MASTERKUBE}},{Key=NodeGroup,Value=${NODEGROUP_NAME}},{Key=kubernetes.io/cluster/${NODEGROUP_NAME},Value=owned},{Key=KubernetesCluster,Value=${NODEGROUP_NAME}}]" \
     ${PUBLIC_IP_OPTIONS})
 
 LAUNCHED_ID=$(echo ${LAUNCHED_INSTANCE} | jq '.Instances[0].InstanceId' | tr -d '"' | sed -e 's/null//g')
@@ -372,11 +375,11 @@ LAUNCHED_INSTANCE=$(aws ec2  describe-instances --profile ${AWS_PROFILE} --regio
 
 if [ "${VPC_USE_PUBLICIP}" == "true" ]; then
     export IPADDR=$(echo ${LAUNCHED_INSTANCE} | jq '.PublicIpAddress' | tr -d '"' | sed -e 's/null//g')
-    CERT_EXTRA_SANS="--cert-extra-sans ${IPADDR},${MASTERKUBE}.${DOMAIN_NAME},masterkube.${DOMAIN_NAME} masterkube-dashboard.${DOMAIN_NAME}"
+    CERT_EXTRA_SANS="--cert-extra-sans ${IPADDR},${MASTERKUBE}.${DOMAIN_NAME},masterkube.${DOMAIN_NAME},masterkube-dashboard.${DOMAIN_NAME}"
     IP_TYPE="public"
 else
     export IPADDR=$(echo ${LAUNCHED_INSTANCE} | jq '.PrivateIpAddress' | tr -d '"' | sed -e 's/null//g')
-    CERT_EXTRA_SANS="--cert-extra-sans ${MASTERKUBE}.${DOMAIN_NAME},masterkube.${DOMAIN_NAME} masterkube-dashboard.${DOMAIN_NAME}"
+    CERT_EXTRA_SANS="--cert-extra-sans ${MASTERKUBE}.${DOMAIN_NAME},masterkube.${DOMAIN_NAME},masterkube-dashboard.${DOMAIN_NAME}"
     IP_TYPE="private"
 fi
 
@@ -396,7 +399,7 @@ scp ${SSH_OPTIONS} -r ../masterkube ${SEED_USER}@${IPADDR}:~
 
 echo "Start kubernetes ${MASTERKUBE} instance master node, kubernetes version=${KUBERNETES_VERSION}, providerID=${PROVIDERID}"
 ssh ${SSH_OPTIONS} ${SEED_USER}@${IPADDR} sudo cp /home/${SEED_USER}/masterkube/bin/* /usr/local/bin
-ssh ${SSH_OPTIONS} ${SEED_USER}@${IPADDR} sudo create-cluster.sh --cni flannel --kubernetes-version "${KUBERNETES_VERSION}"  ${CERT_EXTRA_SANS} --provider-id "\'${PROVIDERID}\'"
+ssh ${SSH_OPTIONS} ${SEED_USER}@${IPADDR} sudo create-cluster.sh --cni-plugin "${CNI_PLUGIN}" --kubernetes-version "${KUBERNETES_VERSION}" --node-group "${NODEGROUP_NAME}" ${CERT_EXTRA_SANS}
 
 scp ${SSH_OPTIONS} ${SEED_USER}@${IPADDR}:/etc/cluster/* ./cluster
 
