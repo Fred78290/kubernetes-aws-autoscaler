@@ -24,3 +24,5 @@ masterkube/bin/aws.defs
 aws/*.json
 
 kubernetes-aws-autoscaler
+
+*.defs
