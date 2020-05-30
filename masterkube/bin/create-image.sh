@@ -4,9 +4,10 @@ set -e
 
 KUBERNETES_VERSION=$(curl -sSL https://dl.k8s.io/release/stable.txt)
 CNI_VERSION=v0.8.5
+CNI_PLUGIN=flannel
 SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
 CACHE=~/.local/aws/cache
-TARGET_IMAGE=bionic-kubernetes-$KUBERNETES_VERSION
+TARGET_IMAGE="bionic-kubernetes-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}"
 OSDISTRO=$(uname -s)
 SSH_KEYNAME="aws-k8s-key"
 CURDIR=$(dirname $0)
@@ -31,7 +32,7 @@ fi
 
 mkdir -p $CACHE
 
-TEMP=`getopt -o fc:i:k:n:op:s:u:v: --long force,profile:,region:,vpc-id:,subnet-id:,sg-id:,use-public-ip:,user:,ami:,custom-image:,ssh-key:,ssh-key-name:,cni-plugin:,cni-version:,kubernetes-version: -n "$0" -- "$@"`
+TEMP=`getopt -o fc:i:k:n:op:s:u:v: --long ecr-password:,force,profile:,region:,vpc-id:,subnet-id:,sg-id:,use-public-ip:,user:,ami:,custom-image:,ssh-key:,ssh-key-name:,cni-plugin:,cni-version:,kubernetes-version: -n "$0" -- "$@"`
 eval set -- "$TEMP"
 
 # extract options and their arguments into variables.
@@ -44,11 +45,13 @@ while true ; do
         -r|--region) AWS_REGION="${2}" ; shift 2;;
         -i|--custom-image) TARGET_IMAGE="$2" ; shift 2;;
         -k|--ssh-key) SSH_KEY=$2 ; shift 2;;
-        -n|--cni-version) CNI_VERSION=$2 ; shift 2;;
+        -i|--cni-version) CNI_VERSION=$2 ; shift 2;;
+        -c|--cni-plugin) CNI_PLUGIN=$2 ; shift 2;;
         -u|--user) SEED_USER=$2 ; shift 2;;
         -v|--kubernetes-version) KUBERNETES_VERSION=$2 ; shift 2;;
 
         --ami) SEED_IMAGE=$2 ; shift 2;;
+        --ecr-password) ECR_PASSWORD=$2 ; shift 2;;
         --ssh-key-name) SSH_KEY_NAME=$2 ; shift 2;;
         --vpc-id) VC_NETWORK_PUBLIC="${2}" ; shift 2;;
         --subnet-id) VPC_SUBNET_ID="${2}" ; shift 2;;
@@ -214,18 +217,21 @@ usermod -aG docker ubuntu
 
 if [ "$CNI_PLUGIN" != "aws" ]; then
     modprobe br_netfilter
+
+    echo "net.bridge.bridge-nf-call-ip6tables = 1" >> /etc/sysctl.conf
     echo "net.bridge.bridge-nf-call-iptables = 1" >> /etc/sysctl.conf
+    echo "net.bridge.bridge-nf-call-arptables = 1" >> /etc/sysctl.conf
+
+    echo "br_netfilter" >> /etc/modules
 fi
 
 /usr/local/bin/kubeadm config images pull --kubernetes-version=${KUBERNETES_VERSION}
 
 if [ "$CNI_PLUGIN" = "aws" ]; then
     docker login -u AWS -p "$ECR_PASSWORD" "602401143452.dkr.ecr.us-west-2.amazonaws.com"
-    pull_image https://raw.githubusercontent.com/aws/amazon-vpc-cni-k8s/release-1.6/config/v1.6/aws-k8s-cni.yaml
+    pull_image https://raw.githubusercontent.com/aws/amazon-vpc-cni-k8s/release-1.6.2/config/v1.6/aws-k8s-cni.yaml
 elif [ "$CNI_PLUGIN" = "calico" ]; then
-    pull_image https://docs.projectcalico.org/v3.2/getting-started/kubernetes/installation/hosted/etcd.yaml
-    pull_image https://docs.projectcalico.org/v3.2/getting-started/kubernetes/installation/hosted/calico.yaml 2>&1
-    pull_image https://docs.projectcalico.org/v3.2/getting-started/kubernetes/installation/hosted/kubernetes-datastore/calicoctl.yaml
+    pull_image https://docs.projectcalico.org/manifests/calico-vxlan.yaml 2>&1
 elif [ "$CNI_PLUGIN" = "flannel" ]; then
     pull_image https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml 2>&1
 elif [ "$CNI_PLUGIN" = "weave" ]; then

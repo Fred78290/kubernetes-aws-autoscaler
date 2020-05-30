@@ -48,7 +48,7 @@
                             "--kubeconfig=/etc/kubernetes/config",
                             "--config=/etc/cluster/kubernetes-aws-autoscaler.json",
                             "--save=/etc/cluster/aws-autoscaler-state.json",
-                            "-v=6",
+                            "-v=5",
                             "-logtostderr=true"
                         ],
                         "imagePullPolicy": "Always",

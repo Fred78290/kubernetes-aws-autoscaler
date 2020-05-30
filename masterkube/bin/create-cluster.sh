@@ -2,7 +2,7 @@
 
 set -e
 
-export CNI=aws
+export CNI_PLUGIN=aws
 export KUBERNETES_VERSION=v1.18.2
 export CLUSTER_DIR=/etc/cluster
 export SCHEME="aws"
@@ -48,7 +48,7 @@ while true; do
         ;;
 
     -c | --cni-plugin)
-        CNI="$2"
+        CNI_PLUGIN="$2"
         shift 2
         ;;
 
@@ -58,7 +58,7 @@ while true; do
         ;;
 
     -s | --cert-extra-sans)
-        CERT_EXTRA_SANS="echo $2 | tr ',' ' '"
+        CERT_EXTRA_SANS="$2"
         shift 2
         ;;
 
@@ -91,29 +91,30 @@ echo "KUBELET_EXTRA_ARGS='${KUBELET_EXTRA_ARGS} --node-ip=${IPADDR}'" > /etc/def
 
 systemctl restart kubelet
 
-if [ -z "$CNI" ]; then
-    CNI="flannel"
+if [ -z "$CNI_PLUGIN" ]; then
+    CNI_PLUGIN="flannel"
 fi
 
-CNI=$(echo "$CNI" | tr '[:upper:]' '[:lower:]')
+CNI_PLUGIN=$(echo "$CNI_PLUGIN" | tr '[:upper:]' '[:lower:]')
 
-case $CNI in
+case $CNI_PLUGIN in
     aws)
         POD_NETWORK_CIDR="${SUBNET_IPV4_CIDR_BLOCK}"
         ;;
     flannel|weave|canal|kube)
-        [ -e /proc/sys/net/bridge/bridge-nf-call-iptables ] && sysctl net.bridge.bridge-nf-call-iptables=1
-        echo "net.bridge.bridge-nf-call-iptables = 1" >> /etc/sysctl.conf
+        POD_NETWORK_CIDR="10.244.0.0/16"
     ;;
     calico)
         echo "Download calicoctl"
 
-        curl -s -O -L https://github.com/projectcalico/calicoctl/releases/download/v3.1.0/calicoctl
-        chmod +x calicoctl
-        mv calicoctl /usr/local/bin
+        POD_NETWORK_CIDR="192.168.0.0/16"
+
+        curl -s -O -L "https://github.com/projectcalico/calicoctl/releases/download/v3.14.1/calicoctl-linux-amd64"
+        chmod +x calicoctl-linux-amd64
+        mv calicoctl-linux-amd64 /usr/local/bin/calicoctl
         ;;
     *)
-        echo "CNI $CNI is not supported"
+        echo "CNI_PLUGIN $CNI_PLUGIN is not supported"
         exit -1
         ;;
 esac
@@ -134,14 +135,14 @@ localAPIEndpoint:
   bindPort: ${APISERVER_ADVERTISE_PORT}
 nodeRegistration:
   criSocket: /var/run/dockershim.sock
-  name: primary
+  name: ${MASTERKUBE}
   taints:
   - effect: NoSchedule
     key: node-role.kubernetes.io/master
   kubeletExtraArgs:
     network-plugin: cni
     provider-id: ${PROVIDERID}
-    cloud-provider: aws
+#   cloud-provider: aws
 ---
 kind: KubeletConfiguration
 apiVersion: kubelet.config.k8s.io/v1beta1
@@ -199,13 +200,13 @@ networking:
   podSubnet: ${POD_NETWORK_CIDR}
 scheduler: {}
 controllerManager:
-  extraArgs:
-    cloud-provider: aws
-    configure-cloud-routes: "false"
+#  extraArgs:
+#   cloud-provider: aws
+#    configure-cloud-routes: "false"
 apiServer:
   extraArgs:
     authorization-mode: Node,RBAC
-    cloud-provider: aws
+#   cloud-provider: aws
   timeoutForControlPlane: 4m0s
   certSANs:
   - ${IPADDR}
@@ -213,7 +214,7 @@ apiServer:
   - ${LOCALHOSTNAME}
 EOF
 
-for CERT_EXTRA in $CERT_EXTRA_SANS
+for CERT_EXTRA in $(tr ',' ' ' <<<$CERT_EXTRA_SANS) 
 do
     echo "  - $CERT_EXTRA" >> ${KUBEADM_CONFIG}
 done
@@ -242,51 +243,45 @@ chmod +r $CLUSTER_DIR/*
 echo "Allow master to host pod"
 kubectl taint nodes --all node-role.kubernetes.io/master- 2>&1
 
-if [ "$CNI" = "aws" ]; then
+if [ "$CNI_PLUGIN" = "aws" ]; then
 
     echo "Install AWS network"
 
-    kubectl apply -f https://raw.githubusercontent.com/aws/amazon-vpc-cni-k8s/release-1.6/config/v1.6/aws-k8s-cni.yaml 2>&1
+    kubectl apply -f "https://raw.githubusercontent.com/aws/amazon-vpc-cni-k8s/release-1.6.2/config/v1.6/aws-k8s-cni.yaml" 2>&1
 
-elif [ "$CNI" = "calico" ]; then
+elif [ "$CNI_PLUGIN" = "calico" ]; then
 
     echo "Install calico network"
 
-    kubectl apply -f https://docs.projectcalico.org/v3.2/getting-started/kubernetes/installation/hosted/etcd.yaml 2>&1
-    
-    kubectl apply -f https://docs.projectcalico.org/v3.2/getting-started/kubernetes/installation/rbac.yaml 2>&1
+    kubectl apply -f "https://docs.projectcalico.org/manifests/calico-vxlan.yaml" 2>&1
 
-    kubectl apply -f https://docs.projectcalico.org/v3.2/getting-started/kubernetes/installation/hosted/calico.yaml 2>&1
-
-    kubectl apply -f https://docs.projectcalico.org/v3.2/getting-started/kubernetes/installation/hosted/kubernetes-datastore/calicoctl.yaml 2>&1
-
-elif [ "$CNI" = "flannel" ]; then
+elif [ "$CNI_PLUGIN" = "flannel" ]; then
 
     echo "Install flannel network"
 
-    kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml 2>&1
+    kubectl apply -f "https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml" 2>&1
 
-elif [ "$CNI" = "weave" ]; then
+elif [ "$CNI_PLUGIN" = "weave" ]; then
 
     echo "Install weave network for K8"
 
     kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')" 2>&1
 
-elif [ "$CNI" = "canal" ]; then
+elif [ "$CNI_PLUGIN" = "canal" ]; then
 
     echo "Install canal network"
 
-    kubectl apply -f https://raw.githubusercontent.com/projectcalico/canal/master/k8s-install/1.7/rbac.yaml 2>&1
-    kubectl apply -f https://raw.githubusercontent.com/projectcalico/canal/master/k8s-install/1.7/canal.yaml 2>&1
+    kubectl apply -f "https://raw.githubusercontent.com/projectcalico/canal/master/k8s-install/1.7/rbac.yaml" 2>&1
+    kubectl apply -f "https://raw.githubusercontent.com/projectcalico/canal/master/k8s-install/1.7/canal.yaml" 2>&1
 
-elif [ "$CNI" = "kube" ]; then
+elif [ "$CNI_PLUGIN" = "kube" ]; then
 
     echo "Install kube network"
 
-    kubectl apply -f https://raw.githubusercontent.com/cloudnativelabs/kube-router/master/daemonset/kubeadm-kuberouter.yaml 2>&1
-    kubectl apply -f https://raw.githubusercontent.com/cloudnativelabs/kube-router/master/daemonset/kubeadm-kuberouter-all-features.yaml 2>&1
+    kubectl apply -f "https://raw.githubusercontent.com/cloudnativelabs/kube-router/master/daemonset/kubeadm-kuberouter.yaml" 2>&1
+    kubectl apply -f "https://raw.githubusercontent.com/cloudnativelabs/kube-router/master/daemonset/kubeadm-kuberouter-all-features.yaml" 2>&1
 
-elif [ "$CNI" = "romana" ]; then
+elif [ "$CNI_PLUGIN" = "romana" ]; then
 
     echo "Install romana network"
 
