@@ -99,6 +99,7 @@ type AutoScalerServerConfig struct {
 	ProviderID         string                            `json:"secret"`                        // Mandatory, secret Identifier, client must match this
 	MinNode            int                               `json:"minNode"`                       // Mandatory, Min AutoScaler VM
 	MaxNode            int                               `json:"maxNode"`                       // Mandatory, Max AutoScaler VM
+	MaxPods            int                               `json:"maxPods"`                       // Mandatory, Max kubelet pods
 	NodePrice          float64                           `json:"nodePrice"`                     // Optional, The VM price
 	PodPrice           float64                           `json:"podPrice"`                      // Optional, The pod price
 	KubeConfig         string                            `json:"-"`
