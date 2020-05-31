@@ -15,11 +15,12 @@ export MASTERKUBE="${NODEGROUP_NAME}-masterkube"
 export PROVIDERID="${SCHEME}://${NODEGROUP_NAME}/object?type=node&name=${MASTERKUBE}"
 export SSH_PRIVATE_KEY=~/.ssh/id_rsa
 export SSH_KEY=$(cat "${SSH_PRIVATE_KEY}.pub")
-export KUBERNETES_VERSION=v1.18.2
+export KUBERNETES_VERSION=v1.18.3
 export KUBECONFIG=${HOME}/.kube/config
 export ROOT_IMG_NAME=bionic-kubernetes
-export CNI_VERSION="v0.8.5"
-export CNI_PLUGIN=calico
+export CNI_VERSION=v0.6.0
+export CNI_PLUGIN_VERSION=v0.8.6
+export CNI_PLUGIN=aws
 export TARGET_IMAGE="${ROOT_IMG_NAME}-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}"
 export MINNODES=0
 export MAXNODES=5
@@ -39,6 +40,7 @@ export OSDISTRO=$(uname -s)
 export TRANSPORT="tcp"
 export SSH_KEYNAME="aws-k8s-key"
 export VOLUME_SIZE=10
+export MAX_PODS=110
 
 export SEED_USER="<to be filled>"
 export SEED_IMAGE="<to be filled>"
@@ -69,7 +71,7 @@ else
     BASE64="base64"
 fi
 
-TEMP=$(getopt -o p:r:k:n:p:s:t: --long profile:,region:,node-group:,target-image:,seed-image:,seed-user:,vpc-id:,subnet-id:,sg-id:,transport:,ssh-private-key:,cni-version:,kubernetes-version:,max-nodes-total:,cores-total:,memory-total:,max-autoprovisioned-node-group-count:,scale-down-enabled:,scale-down-delay-after-add:,scale-down-delay-after-delete:,scale-down-delay-after-failure:,scale-down-unneeded-time:,scale-down-unready-time:,unremovable-node-recheck-timeout: -n "$0" -- "$@")
+TEMP=$(getopt -o p:r:k:n:p:s:t: --long max-pods:,profile:,region:,node-group:,target-image:,seed-image:,seed-user:,vpc-id:,subnet-id:,sg-id:,transport:,ssh-private-key:,cni-version:,cni-plugin-version:,kubernetes-version:,max-nodes-total:,cores-total:,memory-total:,max-autoprovisioned-node-group-count:,scale-down-enabled:,scale-down-delay-after-add:,scale-down-delay-after-delete:,scale-down-delay-after-failure:,scale-down-unneeded-time:,scale-down-unready-time:,unremovable-node-recheck-timeout: -n "$0" -- "$@")
 
 eval set -- "${TEMP}"
 
@@ -82,6 +84,11 @@ while true; do
         ;;
     -r|--region)
         AWS_REGION="$2"
+        shift 2
+        ;;
+
+    --max-pods)
+        MAX_PODS=$2
         shift 2
         ;;
 
@@ -132,6 +139,10 @@ while true; do
         ;;
     -n | --cni-version)
         CNI_VERSION="$2"
+        shift 2
+        ;;
+    -c | --cni-plugin-version)
+        CNI_PLUGIN_VERSION="$2"
         shift 2
         ;;
     -t | --transport)
@@ -198,6 +209,16 @@ while true; do
         ;;
     esac
 done
+
+if [ $CNI_PLUGIN = "aws" ]; then
+    AWS_MAX_PODS=$(curl -s "https://raw.githubusercontent.com/awslabs/amazon-eks-ami/master/files/eni-max-pods.txt" | grep ^${DEFAULT_MACHINE} | awk '{print $2}')
+
+    if [ -z "$AWS_MAX_PODS" ]; then
+        echo "No entry for ${DEFAULT_MACHINE} in eni-max-pods.txt. Not setting ${MAX_PODS} max pods for kubelet"
+    else
+        MAX_PODS=${AWS_MAX_PODS}
+    fi
+fi
 
 TARGET_IMAGE="${ROOT_IMG_NAME}-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}"
 KEYEXISTS=$(aws ec2 describe-key-pairs --profile ${AWS_PROFILE} --region ${AWS_REGION} --key-names "${SSH_KEYNAME}" | jq  '.KeyPairs[].KeyName' | tr -d '"')
@@ -279,6 +300,7 @@ if [ -z "${TARGET_IMAGE_AMI}" ]; then
         --profile="${AWS_PROFILE}" \
         --region="${AWS_REGION}" \
         --cni-version="${CNI_VERSION}" \
+        --cni-plugin-version="${CNI_PLUGIN_VERSION}" \
         --cni-plugin="${CNI_PLUGIN}" \
         --ecr-password="${ECR_PASSWORD}" \
         --custom-image="${TARGET_IMAGE}" \
@@ -399,7 +421,7 @@ scp ${SSH_OPTIONS} -r ../masterkube ${SEED_USER}@${IPADDR}:~
 
 echo "Start kubernetes ${MASTERKUBE} instance master node, kubernetes version=${KUBERNETES_VERSION}, providerID=${PROVIDERID}"
 ssh ${SSH_OPTIONS} ${SEED_USER}@${IPADDR} sudo cp /home/${SEED_USER}/masterkube/bin/* /usr/local/bin
-ssh ${SSH_OPTIONS} ${SEED_USER}@${IPADDR} sudo create-cluster.sh --cni-plugin "${CNI_PLUGIN}" --kubernetes-version "${KUBERNETES_VERSION}" --node-group "${NODEGROUP_NAME}" ${CERT_EXTRA_SANS}
+ssh ${SSH_OPTIONS} ${SEED_USER}@${IPADDR} sudo create-cluster.sh --max-pods ${MAX_PODS} --cni-plugin "${CNI_PLUGIN}" --kubernetes-version "${KUBERNETES_VERSION}" --node-group "${NODEGROUP_NAME}" ${CERT_EXTRA_SANS}
 
 scp ${SSH_OPTIONS} ${SEED_USER}@${IPADDR}:/etc/cluster/* ./cluster
 
@@ -437,6 +459,7 @@ AUTOSCALER_CONFIG=$(cat <<EOF
     "secret": "${SCHEME}",
     "minNode": ${MINNODES},
     "maxNode": ${MAXNODES},
+    "maxPods": ${MAX_PODS},
     "nodePrice": 0.0,
     "podPrice": 0.0,
     "image": "${TARGET_IMAGE}",

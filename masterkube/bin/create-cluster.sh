@@ -3,7 +3,7 @@
 set -e
 
 export CNI_PLUGIN=aws
-export KUBERNETES_VERSION=v1.18.2
+export KUBERNETES_VERSION=v1.18.3
 export CLUSTER_DIR=/etc/cluster
 export SCHEME="aws"
 export NODEGROUP_NAME="aws-ca-k8s"
@@ -27,23 +27,23 @@ export POD_NETWORK_CIDR="10.244.0.0/16"
 export SERVICE_NETWORK_CIDR="10.96.0.0/12"
 export CLUSTER_DNS="10.96.0.10"
 export CERT_EXTRA_SANS=
+export MAX_PODS=110
 
-TEMP=$(getopt -o n:c:k:s:i: --long node-group:,cert-extra-sans:,cni-plugin:,cni-version:,kubernetes-version: -n "$0" -- "$@")
+TEMP=$(getopt -o p:n:c:k:s: --long max-pods:,node-group:,cert-extra-sans:,cni-plugin:,kubernetes-version: -n "$0" -- "$@")
 
 eval set -- "${TEMP}"
 
 # extract options and their arguments into variables.
 while true; do
     case "$1" in
+    -p | --max-pods)
+        MAX_PODS=$2
+        shift 2
+        ;;
     -n | --node-group)
         NODEGROUP_NAME="$2"
         MASTERKUBE="${NODEGROUP_NAME}-masterkube"
         PROVIDERID="${SCHEME}://${NODEGROUP_NAME}/object?type=node&name=${HOSTNAME}"
-        shift 2
-        ;;
-
-    -i | --cni-version)
-        CNI_VERSION="$2"
         shift 2
         ;;
 
@@ -100,10 +100,21 @@ CNI_PLUGIN=$(echo "$CNI_PLUGIN" | tr '[:upper:]' '[:lower:]')
 case $CNI_PLUGIN in
     aws)
         POD_NETWORK_CIDR="${SUBNET_IPV4_CIDR_BLOCK}"
+
+        MAC=$(curl -s http://169.254.169.254/latest/meta-data/network/interfaces/macs/ -s | head -n 1 | sed 's/\/$//')
+        TEN_RANGE=$(curl -s http://169.254.169.254/latest/meta-data/network/interfaces/macs/$MAC/vpc-ipv4-cidr-blocks | grep -c '^10\..*' || true )
+
+        if [[ "$TEN_RANGE" != "0" ]]; then
+          SERVICE_NETWORK_CIDR="172.20.0.0/16"
+          CLUSTER_DNS="172.20.0.10"
+        else
+          CLUSTER_DNS="10.100.0.10"
+          SERVICE_NETWORK_CIDR="10.100.0.0/16"
+        fi
         ;;
     flannel|weave|canal|kube)
         POD_NETWORK_CIDR="10.244.0.0/16"
-    ;;
+        ;;
     calico)
         echo "Download calicoctl"
 
@@ -114,7 +125,7 @@ case $CNI_PLUGIN in
         mv calicoctl-linux-amd64 /usr/local/bin/calicoctl
         ;;
     *)
-        echo "CNI_PLUGIN $CNI_PLUGIN is not supported"
+        echo "CNI_PLUGIN '$CNI_PLUGIN' is not supported"
         exit -1
         ;;
 esac
@@ -162,6 +173,7 @@ authorization:
 clusterDNS:
 - ${CLUSTER_DNS}
 failSwapOn: false
+hairpinMode: hairpin-veth
 featureGates:
   VolumeSubpathEnvExpansion: true
 readOnlyPort: 10255
@@ -181,6 +193,7 @@ staticPodPath: /etc/kubernetes/manifests
 streamingConnectionIdleTimeout: 0s
 syncFrequency: 0s
 volumeStatsAggPeriod: 0s
+maxPods: ${MAX_PODS}
 ---
 apiVersion: kubeadm.k8s.io/v1beta2
 kind: ClusterConfiguration
