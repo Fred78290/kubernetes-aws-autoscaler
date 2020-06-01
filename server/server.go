@@ -1370,6 +1370,8 @@ func StartServer(kubeConfig, saveState, configFileName string) {
 		glog.Fatalf("failed to listen: %v", err)
 	}
 
+	defer lis.Close()
+
 	server := grpc.NewServer()
 
 	apigrc.RegisterCloudProviderServiceServer(server, autoScalerServer)

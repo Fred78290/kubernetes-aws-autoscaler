@@ -74,11 +74,16 @@ func (vm *AutoScalerServerNode) prepareKubelet() (string, error) {
 	var err error
 	var fName = fmt.Sprintf("/tmp/set-kubelet-default-%s.sh", vm.NodeName)
 	var address = vm.Addresses[0]
+	var maxPods = vm.serverConfig.MaxPods
+
+	if maxPods == 0 {
+		maxPods = 110
+	}
 
 	kubeletDefault := []string{
 		"#!/bin/bash",
 		". /etc/default/kubelet",
-		fmt.Sprintf("echo \"KUBELET_EXTRA_ARGS=\\\"$KUBELET_EXTRA_ARGS --node-ip=%s --provider-id=%s\\\"\" > /etc/default/kubelet", address, vm.ProviderID),
+		fmt.Sprintf("echo \"KUBELET_EXTRA_ARGS=\\\"$KUBELET_EXTRA_ARGS --max-pods=%d --node-ip=%s --provider-id=%s\\\"\" > /etc/default/kubelet", maxPods, address, vm.ProviderID),
 		"systemctl restart kubelet",
 	}
 
@@ -185,6 +190,7 @@ func (vm *AutoScalerServerNode) setNodeLabels(nodeLabels, systemLabels Kubernete
 			"label",
 			"nodes",
 			vm.NodeName,
+			"node-role.kubernetes.io/worker=worker",
 		}
 
 		// Append extras arguments
