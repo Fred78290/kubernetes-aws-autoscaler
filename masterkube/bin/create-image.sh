@@ -3,8 +3,9 @@
 set -e
 
 KUBERNETES_VERSION=v1.15.11
-CNI_VERSION=v0.8.5
-CNI_PLUGIN=flannel
+CNI_VERSION=v0.6.0
+CNI_PLUGIN_VERSION=v0.8.6
+CNI_PLUGIN=aws
 SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
 CACHE=~/.local/aws/cache
 TARGET_IMAGE="bionic-kubernetes-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}"
@@ -30,9 +31,29 @@ else
     TZ=$(sudo systemsetup -gettimezone | awk '{print $2}')
 fi
 
+function get_ecs_container_account_for_region () {
+    local region="$1"
+    case "${region}" in
+    ap-east-1)
+        echo "800184023465";;
+    me-south-1)
+        echo "558608220178";;
+    cn-north-1)
+        echo "918309763551";;
+    cn-northwest-1)
+        echo "961992271922";;
+    us-gov-west-1)
+        echo "013241004608";;
+    us-gov-east-1)
+        echo "151742754352}";;
+    *)
+        echo "602401143452";;
+    esac
+}
+
 mkdir -p $CACHE
 
-TEMP=`getopt -o fc:i:k:n:op:s:u:v: --long ecr-password:,force,profile:,region:,vpc-id:,subnet-id:,sg-id:,use-public-ip:,user:,ami:,custom-image:,ssh-key:,ssh-key-name:,cni-plugin:,cni-version:,kubernetes-version: -n "$0" -- "$@"`
+TEMP=`getopt -o fc:i:k:n:op:s:u:v: --long ecr-password:,force,profile:,region:,vpc-id:,subnet-id:,sg-id:,use-public-ip:,user:,ami:,custom-image:,ssh-key:,ssh-key-name:,cni-plugin:,cni-version:,cni-plugin-version:,kubernetes-version: -n "$0" -- "$@"`
 eval set -- "$TEMP"
 
 # extract options and their arguments into variables.
@@ -46,6 +67,7 @@ while true ; do
         -i|--custom-image) TARGET_IMAGE="$2" ; shift 2;;
         -k|--ssh-key) SSH_KEY=$2 ; shift 2;;
         -i|--cni-version) CNI_VERSION=$2 ; shift 2;;
+        -i|--cni-plugin-version) CNI_PLUGIN_VERSION=$2 ; shift 2;;
         -c|--cni-plugin) CNI_PLUGIN=$2 ; shift 2;;
         -u|--user) SEED_USER=$2 ; shift 2;;
         -v|--kubernetes-version) KUBERNETES_VERSION=$2 ; shift 2;;
@@ -66,6 +88,7 @@ done
 TARGET_IMAGE_ID=$(aws ec2 describe-images --profile ${AWS_PROFILE} --region ${AWS_REGION} --filters "Name=architecture,Values=x86_64" "Name=name,Values=${TARGET_IMAGE}" "Name=virtualization-type,Values=hvm" 2>/dev/null | jq '.Images[0].ImageId' | tr -d '"' | sed -e 's/null//g')
 SOURCE_IMAGE_ID=$(aws ec2 describe-images --profile ${AWS_PROFILE} --region ${AWS_REGION} --image-ids "${SEED_IMAGE}" 2>/dev/null | jq '.Images[0].ImageId' | tr -d '"' | sed -e 's/null//g')
 KEYEXISTS=$(aws ec2 describe-key-pairs --profile ${AWS_PROFILE} --region ${AWS_REGION} --key-names "${SSH_KEYNAME}" 2>/dev/null | jq  '.KeyPairs[].KeyName' | tr -d '"')
+ECR_ACCOUNT=$(get_ecs_container_account_for_region $AWS_REGION)
 
 if [ ! -z "${TARGET_IMAGE_ID}" ]; then
     if [ $FORCE = NO ]; then
@@ -107,13 +130,15 @@ cat > $CACHE/mapping.json <<EOF
 ]
 EOF
 
-cat > "${CACHE}/prepare-image.sh" <<EOF
+cat > "${CACHE}/prepare-image.sh" << EOF
 #!/bin/bash
 CNI_VERSION=${CNI_VERSION}
 CNI_PLUGIN=${CNI_PLUGIN}
+CNI_PLUGIN_VERSION=${CNI_PLUGIN_VERSION}
 KUBERNETES_VERSION=${KUBERNETES_VERSION}
 KUBERNETES_MINOR_RELEASE=${KUBERNETES_MINOR_RELEASE}
 ECR_PASSWORD=${ECR_PASSWORD}
+ECR_ACCOUNT=$ECR_ACCOUNT
 EOF
 
 cat >> "${CACHE}/prepare-image.sh" <<"EOF"
@@ -131,44 +156,80 @@ function pull_image() {
 apt-get update
 apt-get upgrade -y
 apt-get autoremove -y
-apt-get install jq socat conntrack -y
+apt-get install jq socat conntrack awscli -y
+
+systemctl disable apparmor
 
 mkdir -p /opt/cni/bin
 mkdir -p /usr/local/bin
 
+# Add some EKS init 
+if [ $CNI_PLUGIN = "aws" ]; then
+    mkdir -p /etc/eks
+    mkdir -p /etc/sysconfig
+    wget https://raw.githubusercontent.com/awslabs/amazon-eks-ami/master/files/eni-max-pods.txt -O /etc/eks/eni-max-pods.txt
+
+    /sbin/iptables-save > /etc/sysconfig/iptables
+
+    wget https://raw.githubusercontent.com/awslabs/amazon-eks-ami/master/files/iptables-restore.service -O /etc/systemd/system/iptables-restore.service
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable iptables-restore
+fi
+
 echo "Prepare to install Docker"
 
 # Setup daemon.
-if [ $KUBERNETES_MINOR_RELEASE -ge 14 ]; then
-    mkdir -p /etc/docker
+mkdir -p /etc/docker
+mkdir -p /etc/systemd/system/docker.service.d
 
+curl https://get.docker.com | bash
+
+if [ $KUBERNETES_MINOR_RELEASE -ge 14 ] && [ $CNI_PLUGIN != "aws" ] ; then
     cat > /etc/docker/daemon.json <<SHELL
-{
-    "exec-opts": [
-        "native.cgroupdriver=systemd"
-    ],
+    {
+        "exec-opts": [
+            "native.cgroupdriver=systemd"
+        ],
+        "log-driver": "json-file",
+        "log-opts": {
+            "max-size": "100m"
+        },
+        "storage-driver": "overlay2"
+    }
+SHELL
+elif [ $CNI_PLUGIN = "aws" ]; then        
+    cat > /etc/docker/daemon.json <<SHELL
+    {
+    "bridge": "none",
     "log-driver": "json-file",
     "log-opts": {
-        "max-size": "100m"
+        "max-size": "10m",
+        "max-file": "10"
     },
-    "storage-driver": "overlay2"
-}
+    "live-restore": true,
+    "max-concurrent-downloads": 10
+    }
 SHELL
-
-    curl https://get.docker.com | bash
-
-    mkdir -p /etc/systemd/system/docker.service.d
-
-    # Restart docker.
-    systemctl daemon-reload
-    systemctl restart docker
-else
-    curl https://get.docker.com | bash
 fi
+
+# Restart docker.
+systemctl daemon-reload
+systemctl restart docker
 
 echo "Prepare to install CNI plugins"
 
-curl -L "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz" | tar -C /opt/cni/bin -xz
+case $CNI_PLUGIN_VERSION in
+    v0.7*)
+        URL_PLUGINS="https://github.com/containernetworking/plugins/releases/download/${CNI_PLUGIN_VERSION}/cni-plugins-amd64-${CNI_PLUGIN_VERSION}.tgz"
+    ;;
+    *)
+        URL_PLUGINS="https://github.com/containernetworking/plugins/releases/download/${CNI_PLUGIN_VERSION}/cni-plugins-linux-amd64-${CNI_PLUGIN_VERSION}.tgz"
+    ;;
+esac
+
+curl -L "${URL_PLUGINS}" | tar -C /opt/cni/bin -xz
+curl -L "https://github.com/containernetworking/cni/releases/download/${CNI_VERSION}/cni-amd64-${CNI_VERSION}.tgz" | tar -C /opt/cni/bin -xz
 
 cd /usr/local/bin
 curl -L --remote-name-all https://storage.googleapis.com/kubernetes-release/release/${KUBERNETES_VERSION}/bin/linux/amd64/{kubeadm,kubelet,kubectl,kube-proxy}
@@ -180,6 +241,8 @@ cat > /etc/systemd/system/kubelet.service <<SHELL
 [Unit]
 Description=kubelet: The Kubernetes Node Agent
 Documentation=http://kubernetes.io/docs/
+After=docker.service
+Requires=docker.service
 
 [Service]
 ExecStart=/usr/local/bin/kubelet
@@ -191,22 +254,40 @@ RestartSec=10
 WantedBy=multi-user.target
 SHELL
 
-cat > /etc/systemd/system/kubelet.service.d/10-kubeadm.conf <<"SHELL"
-# Note: This dropin only works with kubeadm and kubelet v1.11+
-[Service]
-Environment="KUBELET_KUBECONFIG_ARGS=--bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf"
-Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml"
-# This is a file that "kubeadm init" and "kubeadm join" generate at runtime, populating the KUBELET_KUBEADM_ARGS variable dynamically
-EnvironmentFile=-/var/lib/kubelet/kubeadm-flags.env
-# This is a file that the user can use for overrides of the kubelet args as a last resort. Preferably, the user should use
-# the .NodeRegistration.KubeletExtraArgs object in the configuration files instead. KUBELET_EXTRA_ARGS should be sourced from this file.
-EnvironmentFile=-/etc/default/kubelet
-ExecStart=
-ExecStart=/usr/local/bin/kubelet $KUBELET_KUBECONFIG_ARGS $KUBELET_CONFIG_ARGS $KUBELET_KUBEADM_ARGS $KUBELET_EXTRA_ARGS
+if [ $CNI_PLUGIN = "aws" ]; then
+    cat > /etc/systemd/system/kubelet.service.d/10-kubeadm.conf <<- "SHELL"
+    # Note: This dropin only works with kubeadm and kubelet v1.11+
+    [Service]
+    Environment="KUBELET_KUBECONFIG_ARGS=--bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf"
+    Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml"
+    # This is a file that "kubeadm init" and "kubeadm join" generate at runtime, populating the KUBELET_KUBEADM_ARGS variable dynamically
+    EnvironmentFile=-/var/lib/kubelet/kubeadm-flags.env
+    # This is a file that the user can use for overrides of the kubelet args as a last resort. Preferably, the user should use
+    # the .NodeRegistration.KubeletExtraArgs object in the configuration files instead. KUBELET_EXTRA_ARGS should be sourced from this file.
+    EnvironmentFile=-/etc/default/kubelet
+    # Add iptables enable forwarding
+    ExecStartPre=/sbin/iptables -P FORWARD ACCEPT -w 5
+    ExecStart=
+    ExecStart=/usr/local/bin/kubelet $KUBELET_KUBECONFIG_ARGS $KUBELET_CONFIG_ARGS $KUBELET_KUBEADM_ARGS $KUBELET_EXTRA_ARGS
 SHELL
+else
+    cat > /etc/systemd/system/kubelet.service.d/10-kubeadm.conf <<- "SHELL"
+    # Note: This dropin only works with kubeadm and kubelet v1.11+
+    [Service]
+    Environment="KUBELET_KUBECONFIG_ARGS=--bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf"
+    Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml"
+    # This is a file that "kubeadm init" and "kubeadm join" generate at runtime, populating the KUBELET_KUBEADM_ARGS variable dynamically
+    EnvironmentFile=-/var/lib/kubelet/kubeadm-flags.env
+    # This is a file that the user can use for overrides of the kubelet args as a last resort. Preferably, the user should use
+    # the .NodeRegistration.KubeletExtraArgs object in the configuration files instead. KUBELET_EXTRA_ARGS should be sourced from this file.
+    EnvironmentFile=-/etc/default/kubelet
+    ExecStart=
+    ExecStart=/usr/local/bin/kubelet $KUBELET_KUBECONFIG_ARGS $KUBELET_CONFIG_ARGS $KUBELET_KUBEADM_ARGS $KUBELET_EXTRA_ARGS
+SHELL
+fi
 
 #echo 'KUBELET_EXTRA_ARGS="--network-plugin=cni --fail-swap-on=false --read-only-port=10255 --feature-gates=VolumeSubpathEnvExpansion=true"' > /etc/default/kubelet
-echo 'KUBELET_EXTRA_ARGS=' > /etc/default/kubelet
+echo 'KUBELET_EXTRA_ARGS=--network-plugin=cni' > /etc/default/kubelet
 
 echo 'export PATH=/opt/cni/bin:$PATH' >> /etc/profile.d/apps-bin-path.sh
 
@@ -231,14 +312,14 @@ if [ "$CNI_PLUGIN" = "aws" ]; then
     docker login -u AWS -p "$ECR_PASSWORD" "602401143452.dkr.ecr.us-west-2.amazonaws.com"
     pull_image https://raw.githubusercontent.com/aws/amazon-vpc-cni-k8s/release-1.6.2/config/v1.6/aws-k8s-cni.yaml
 elif [ "$CNI_PLUGIN" = "calico" ]; then
-    pull_image https://docs.projectcalico.org/manifests/calico-vxlan.yaml 2>&1
+    pull_image https://docs.projectcalico.org/manifests/calico-vxlan.yaml
 elif [ "$CNI_PLUGIN" = "flannel" ]; then
-    pull_image https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml 2>&1
+    pull_image https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
 elif [ "$CNI_PLUGIN" = "weave" ]; then
     pull_image "https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')"
 elif [ "$CNI_PLUGIN" = "canal" ]; then
-    pull_image https://raw.githubusercontent.com/projectcalico/canal/master/k8s-install/1.7/rbac.yaml 2>&1
-    pull_image https://raw.githubusercontent.com/projectcalico/canal/master/k8s-install/1.7/canal.yaml 2>&1
+    pull_image https://raw.githubusercontent.com/projectcalico/canal/master/k8s-install/1.7/rbac.yaml
+    pull_image https://raw.githubusercontent.com/projectcalico/canal/master/k8s-install/1.7/canal.yaml
 elif [ "$CNI_PLUGIN" = "kube" ]; then
     pull_image https://raw.githubusercontent.com/cloudnativelabs/kube-router/master/daemonset/kubeadm-kuberouter.yaml
     pull_image https://raw.githubusercontent.com/cloudnativelabs/kube-router/master/daemonset/kubeadm-kuberouter-all-features.yaml
