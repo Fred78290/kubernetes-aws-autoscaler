@@ -3,6 +3,7 @@
 set -e
 
 export CNI_PLUGIN=aws
+export CLOUD_PROVIDER=aws
 export KUBERNETES_VERSION=v1.18.3
 export CLUSTER_DIR=/etc/cluster
 export SCHEME="aws"
@@ -11,6 +12,7 @@ export MASTERKUBE="${NODEGROUP_NAME}-masterkube"
 export PROVIDERID="${SCHEME}://${NODEGROUP_NAME}/object?type=node&name=${HOSTNAME}"
 export IPADDR=$(curl http://169.254.169.254/latest/meta-data/local-ipv4)
 export LOCALHOSTNAME=$(curl -s http://169.254.169.254/latest/meta-data/local-hostname)
+export INSTANCEID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
 export AWS_DOMAIN=${LOCALHOSTNAME#*.*}
 export MAC_ADDRESS="$(curl -s http://169.254.169.254/latest/meta-data/mac)"
 export SUBNET_IPV4_CIDR_BLOCK=$(curl -s http://169.254.169.254/latest/meta-data/network/interfaces/macs/${MAC_ADDRESS}/subnet-ipv4-cidr-block)
@@ -29,7 +31,7 @@ export CLUSTER_DNS="10.96.0.10"
 export CERT_EXTRA_SANS=
 export MAX_PODS=110
 
-TEMP=$(getopt -o p:n:c:k:s: --long max-pods:,node-group:,cert-extra-sans:,cni-plugin:,kubernetes-version: -n "$0" -- "$@")
+TEMP=$(getopt -o p:n:c:k:s: --long cloud-provider:,max-pods:,node-group:,cert-extra-sans:,cni-plugin:,kubernetes-version: -n "$0" -- "$@")
 
 eval set -- "${TEMP}"
 
@@ -62,6 +64,10 @@ while true; do
         shift 2
         ;;
 
+    --cloud-provider)
+        CLOUD_PROVIDER="$2"
+        shift 2
+        ;;
     --)
         shift
         break
@@ -87,8 +93,6 @@ fi
 
 source /etc/default/kubelet
 
-echo "KUBELET_EXTRA_ARGS='${KUBELET_EXTRA_ARGS} --node-ip=${IPADDR}'" > /etc/default/kubelet
-
 systemctl restart kubelet
 
 if [ -z "$CNI_PLUGIN" ]; then
@@ -96,6 +100,16 @@ if [ -z "$CNI_PLUGIN" ]; then
 fi
 
 CNI_PLUGIN=$(echo "$CNI_PLUGIN" | tr '[:upper:]' '[:lower:]')
+
+if [ $CLOUD_PROVIDER == "aws" ]; then
+  KUBELET_EXTRA_ARGS="${KUBELET_EXTRA_ARGS} --cloud-provider=${CLOUD_PROVIDER} --node-ip=${IPADDR}"
+  NODENAME=$LOCALHOSTNAME
+else
+  NODENAME=$MASTERKUBE
+  KUBELET_EXTRA_ARGS="${KUBELET_EXTRA_ARGS} --node-ip=${IPADDR}"
+fi
+
+echo "KUBELET_EXTRA_ARGS='${KUBELET_EXTRA_ARGS}'" > /etc/default/kubelet
 
 case $CNI_PLUGIN in
     aws)
@@ -130,6 +144,7 @@ case $CNI_PLUGIN in
         ;;
 esac
 
+if [ $CLOUD_PROVIDER = "aws" ]; then
 cat > ${KUBEADM_CONFIG} <<EOF
 apiVersion: kubeadm.k8s.io/v1beta2
 kind: InitConfiguration
@@ -146,14 +161,14 @@ localAPIEndpoint:
   bindPort: ${APISERVER_ADVERTISE_PORT}
 nodeRegistration:
   criSocket: /var/run/dockershim.sock
-  name: ${MASTERKUBE}
+  name: ${NODENAME}
   taints:
   - effect: NoSchedule
     key: node-role.kubernetes.io/master
   kubeletExtraArgs:
     network-plugin: cni
     provider-id: ${PROVIDERID}
-#   cloud-provider: aws
+    cloud-provider: aws
 ---
 kind: KubeletConfiguration
 apiVersion: kubelet.config.k8s.io/v1beta1
@@ -213,19 +228,109 @@ networking:
   podSubnet: ${POD_NETWORK_CIDR}
 scheduler: {}
 controllerManager:
-#  extraArgs:
-#   cloud-provider: aws
-#    configure-cloud-routes: "false"
+  extraArgs:
+    cloud-provider: aws
+    configure-cloud-routes: "false"
 apiServer:
   extraArgs:
     authorization-mode: Node,RBAC
-#   cloud-provider: aws
+    cloud-provider: aws
   timeoutForControlPlane: 4m0s
   certSANs:
   - ${IPADDR}
   - ${HOSTNAME}
   - ${LOCALHOSTNAME}
 EOF
+else
+cat > ${KUBEADM_CONFIG} <<EOF
+apiVersion: kubeadm.k8s.io/v1beta2
+kind: InitConfiguration
+bootstrapTokens:
+- groups:
+  - system:bootstrappers:kubeadm:default-node-token
+  token: ${KUBEADM_TOKEN}
+  ttl: ${TOKEN_TLL}
+  usages:
+  - signing
+  - authentication
+localAPIEndpoint:
+  advertiseAddress: ${APISERVER_ADVERTISE_ADDRESS}
+  bindPort: ${APISERVER_ADVERTISE_PORT}
+nodeRegistration:
+  criSocket: /var/run/dockershim.sock
+  name: ${NODENAME}
+  taints:
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/master
+  kubeletExtraArgs:
+    network-plugin: cni
+    provider-id: ${PROVIDERID}
+---
+kind: KubeletConfiguration
+apiVersion: kubelet.config.k8s.io/v1beta1
+authentication:
+  anonymous:
+    enabled: false
+  webhook:
+    cacheTTL: 0s
+    enabled: true
+  x509:
+    clientCAFile: /etc/kubernetes/pki/ca.crt
+authorization:
+  mode: Webhook
+  webhook:
+    cacheAuthorizedTTL: 0s
+    cacheUnauthorizedTTL: 0s
+clusterDNS:
+- ${CLUSTER_DNS}
+failSwapOn: false
+hairpinMode: hairpin-veth
+featureGates:
+  VolumeSubpathEnvExpansion: true
+readOnlyPort: 10255
+clusterDomain: cluster.local
+cpuManagerReconcilePeriod: 0s
+evictionPressureTransitionPeriod: 0s
+fileCheckFrequency: 0s
+healthzBindAddress: 127.0.0.1
+healthzPort: 10248
+httpCheckFrequency: 0s
+imageMinimumGCAge: 0s
+nodeStatusReportFrequency: 0s
+nodeStatusUpdateFrequency: 0s
+rotateCertificates: true
+runtimeRequestTimeout: 0s
+staticPodPath: /etc/kubernetes/manifests
+streamingConnectionIdleTimeout: 0s
+syncFrequency: 0s
+volumeStatsAggPeriod: 0s
+maxPods: ${MAX_PODS}
+---
+apiVersion: kubeadm.k8s.io/v1beta2
+kind: ClusterConfiguration
+certificatesDir: /etc/kubernetes/pki
+clusterName: ${NODEGROUP_NAME}
+dns:
+  type: CoreDNS
+etcd:
+  local:
+    dataDir: /var/lib/etcd
+imageRepository: k8s.gcr.io
+kubernetesVersion: ${KUBERNETES_VERSION}
+controlPlaneEndpoint: ${APISERVER_ADVERTISE_ADDRESS}:${APISERVER_ADVERTISE_PORT}
+networking:
+  dnsDomain: cluster.local
+  serviceSubnet: ${SERVICE_NETWORK_CIDR}
+  podSubnet: ${POD_NETWORK_CIDR}
+scheduler: {}
+apiServer:
+  timeoutForControlPlane: 4m0s
+  certSANs:
+  - ${IPADDR}
+  - ${HOSTNAME}
+  - ${LOCALHOSTNAME}
+EOF
+fi
 
 for CERT_EXTRA in $(tr ',' ' ' <<<$CERT_EXTRA_SANS) 
 do
@@ -301,5 +406,16 @@ elif [ "$CNI_PLUGIN" = "romana" ]; then
     kubectl apply -f https://raw.githubusercontent.com/romana/romana/master/containerize/specs/romana-kubeadm.yml 2>&1
 
 fi
+
+kubectl annotate node ${NODENAME} \
+  "cluster.autoscaler.nodegroup/name=${NODEGROUP_NAME}" \
+  "cluster.autoscaler.nodegroup/instance-id=${INSTANCEID}" \
+  "cluster.autoscaler.nodegroup/instance-name=${MASTERKUBE}" \
+  "cluster.autoscaler.nodegroup/node-index=0" \
+  "cluster.autoscaler.nodegroup/autoprovision=false" \
+  "cluster-autoscaler.kubernetes.io/scale-down-disabled=true" \
+  --overwrite
+
+kubectl label nodes ${NODENAME} "cluster.autoscaler.nodegroup/name=${NODEGROUP_NAME}" "master=true" --overwrite
 
 echo "Done k8s master node"

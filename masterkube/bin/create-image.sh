@@ -15,11 +15,10 @@ CURDIR=$(dirname $0)
 FORCE=NO
 SEED_USER=ubuntu
 SEED_IMAGE="<to be filled>"
-VPC_ID="<to be filled>"
-VPC_SUBNET_ID="<to be filled>"
-VPC_SECURITY_GROUPID="<to be filled>"
+VPC_MASTER_SUBNET_ID="<to be filled>"
+VPC_MASTER_SECURITY_GROUPID="<to be filled>"
 
-VPC_USE_PUBLICIP=true
+VPC_MASTER_USE_PUBLICIP=true
 
 SSH_OPTIONS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
 
@@ -53,7 +52,7 @@ function get_ecs_container_account_for_region () {
 
 mkdir -p $CACHE
 
-TEMP=`getopt -o fc:i:k:n:op:s:u:v: --long ecr-password:,force,profile:,region:,vpc-id:,subnet-id:,sg-id:,use-public-ip:,user:,ami:,custom-image:,ssh-key:,ssh-key-name:,cni-plugin:,cni-version:,cni-plugin-version:,kubernetes-version: -n "$0" -- "$@"`
+TEMP=`getopt -o fc:i:k:n:op:s:u:v: --long ecr-password:,force,profile:,region:,subnet-id:,sg-id:,use-public-ip:,user:,ami:,custom-image:,ssh-key:,ssh-key-name:,cni-plugin:,cni-version:,cni-plugin-version:,kubernetes-version: -n "$0" -- "$@"`
 eval set -- "$TEMP"
 
 # extract options and their arguments into variables.
@@ -75,10 +74,9 @@ while true ; do
         --ami) SEED_IMAGE=$2 ; shift 2;;
         --ecr-password) ECR_PASSWORD=$2 ; shift 2;;
         --ssh-key-name) SSH_KEY_NAME=$2 ; shift 2;;
-        --vpc-id) VC_NETWORK_PUBLIC="${2}" ; shift 2;;
-        --subnet-id) VPC_SUBNET_ID="${2}" ; shift 2;;
-        --sg-id) VPC_SECURITY_GROUPID="${2}" ; shift 2;;
-        --use-public-ip) VPC_USE_PUBLICIP="${2}" ; shift 2;;
+        --subnet-id) VPC_MASTER_SUBNET_ID="${2}" ; shift 2;;
+        --sg-id) VPC_MASTER_SECURITY_GROUPID="${2}" ; shift 2;;
+        --use-public-ip) VPC_MASTER_USE_PUBLICIP="${2}" ; shift 2;;
 
         --) shift ; break ;;
         *) echo "$1 - Internal error!" ; exit 1 ;;
@@ -156,7 +154,7 @@ function pull_image() {
 apt-get update
 apt-get upgrade -y
 apt-get autoremove -y
-apt-get install jq socat conntrack awscli -y
+apt-get install jq socat conntrack awscli curl -y
 
 systemctl disable apparmor
 
@@ -286,8 +284,9 @@ else
 SHELL
 fi
 
+echo 'KUBELET_EXTRA_ARGS="--network-plugin=cni"' > /etc/default/kubelet
+
 #echo 'KUBELET_EXTRA_ARGS="--network-plugin=cni --fail-swap-on=false --read-only-port=10255 --feature-gates=VolumeSubpathEnvExpansion=true"' > /etc/default/kubelet
-echo 'KUBELET_EXTRA_ARGS=--network-plugin=cni' > /etc/default/kubelet
 
 echo 'export PATH=/opt/cni/bin:$PATH' >> /etc/profile.d/apps-bin-path.sh
 
@@ -336,7 +335,7 @@ EOF
 
 chmod +x "${CACHE}/prepare-image.sh"
 
-if [ "${VPC_USE_PUBLICIP}" == "true" ]; then
+if [ "${VPC_MASTER_USE_PUBLICIP}" == "true" ]; then
     PUBLIC_IP_OPTIONS=--associate-public-ip-address
 else
     PUBLIC_IP_OPTIONS=--no-associate-public-ip-address
@@ -350,8 +349,8 @@ LAUNCHED_INSTANCE=$(aws ec2 run-instances \
     --count 1  \
     --instance-type t2.micro \
     --key-name ${SSH_KEYNAME} \
-    --subnet-id ${VPC_SUBNET_ID} \
-    --security-group-ids ${VPC_SECURITY_GROUPID} \
+    --subnet-id ${VPC_MASTER_SUBNET_ID} \
+    --security-group-ids ${VPC_MASTER_SECURITY_GROUPID} \
     --block-device-mappings "file://${CACHE}/mapping.json" \
     --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${TARGET_IMAGE}}]" \
     ${PUBLIC_IP_OPTIONS})
@@ -377,7 +376,7 @@ echo
 
 LAUNCHED_INSTANCE=$(aws ec2  describe-instances --profile ${AWS_PROFILE} --region ${AWS_REGION} --instance-ids ${LAUNCHED_ID} | jq .Reservations[0].Instances[0])
 
-if [ "${VPC_USE_PUBLICIP}" == "true" ]; then
+if [ "${VPC_MASTER_USE_PUBLICIP}" == "true" ]; then
     export IPADDR=$(echo ${LAUNCHED_INSTANCE} | jq '.PublicIpAddress' | tr -d '"' | sed -e 's/null//g')
     IP_TYPE="public"
 else

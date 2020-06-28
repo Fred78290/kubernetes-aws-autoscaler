@@ -283,6 +283,11 @@ func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType, user
 		Value: aws.String(strconv.Itoa(nodeIndex)),
 	})
 
+	instanceTags = append(instanceTags, &ec2.Tag{
+		Key:   aws.String(fmt.Sprintf("kubernetes.io/cluster/%s", nodeGroup)),
+		Value: aws.String("owned"),
+	})
+
 	// Add tags
 	if instance.config.Tags != nil && len(instance.config.Tags) > 0 {
 		for _, tag := range instance.config.Tags {

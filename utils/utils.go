@@ -37,9 +37,15 @@ func GetNodeProviderID(serverIdentifier string, node *apiv1.Node) string {
 
 	if len(providerID) == 0 {
 		nodegroupName := node.Labels[constantes.NodeLabelGroupName]
+		instanceName := node.Name
+
+		// Node name and instance name could be differ when using AWS cloud provider
+		if len(node.Annotations[constantes.AnnotationInstanceName]) > 0 {
+			instanceName = node.Annotations[constantes.AnnotationInstanceName]
+		}
 
 		if len(nodegroupName) != 0 {
-			providerID = fmt.Sprintf("%s://%s/object?type=node&name=%s", serverIdentifier, nodegroupName, node.Name)
+			providerID = fmt.Sprintf("%s://%s/object?type=node&name=%s", serverIdentifier, nodegroupName, instanceName)
 			glog.Infof("Warning misconfiguration: node providerID: %s is extracted from node label.", providerID)
 		}
 	}
