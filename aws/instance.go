@@ -180,7 +180,7 @@ func (instance *Ec2Instance) WaitForIP(callback CallbackCheckIPReady) (*string, 
 		if code == 16 {
 			var address *string
 
-			if instance.config.Network.AutoScalerUsePublicIPAddress {
+			if ec2Instance.PublicIpAddress != nil {
 				address = ec2Instance.PublicIpAddress
 			} else {
 				address = ec2Instance.PrivateIpAddress
@@ -305,19 +305,14 @@ func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType, user
 		},
 	}
 
-	if len(instance.config.Network.ENI) > 1 || instance.config.Network.AutoScalerUsePublicIPAddress {
+	if len(instance.config.Network.ENI) > 0 {
 		interfaces := make([]*ec2.InstanceNetworkInterfaceSpecification, len(instance.config.Network.ENI))
 
-		for index, eni := range instance.config.Network.ENI {
-			var publicIP bool
+		input.NetworkInterfaces = interfaces
 
-			if index == 0 && instance.config.Network.AutoScalerUsePublicIPAddress {
-				publicIP = true
-			} else {
-				publicIP = eni.PublicIP
-			}
+		for index, eni := range instance.config.Network.ENI {
 			inf := &ec2.InstanceNetworkInterfaceSpecification{
-				AssociatePublicIpAddress: aws.Bool(publicIP),
+				AssociatePublicIpAddress: aws.Bool(eni.PublicIP),
 				DeleteOnTermination:      aws.Bool(true),
 				Description:              aws.String(instance.InstanceName),
 				DeviceIndex:              aws.Int64(int64(index)),
@@ -329,14 +324,8 @@ func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType, user
 			interfaces[index] = inf
 		}
 
-		if len(interfaces) > 0 {
-			input.NetworkInterfaces = interfaces
-		}
-	} else if len(instance.config.Network.ENI) > 0 {
-		input.SubnetId = aws.String(instance.config.Network.ENI[0].SubnetID)
-		input.SecurityGroupIds = []*string{
-			aws.String(instance.config.Network.ENI[0].SecurityGroupID),
-		}
+	} else {
+		return fmt.Errorf("Unable create worker node, any network interface defined")
 	}
 
 	if disk > 0 {
@@ -451,7 +440,7 @@ func (instance *Ec2Instance) Status() (*Status, error) {
 
 			return nil, fmt.Errorf("EC2 Instance %s is terminated", instance.InstanceName)
 		} else if *code == 16 || *code == 0 {
-			if instance.config.Network.AutoScalerUsePublicIPAddress {
+			if ec2Instance.PublicIpAddress != nil {
 				address = ec2Instance.PublicIpAddress
 			} else {
 				address = ec2Instance.PrivateIpAddress
