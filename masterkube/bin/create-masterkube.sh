@@ -356,7 +356,6 @@ if [ -z "${TARGET_IMAGE_AMI}" ]; then
         --cni-version="${CNI_VERSION}" \
         --cni-plugin-version="${CNI_PLUGIN_VERSION}" \
         --cni-plugin="${CNI_PLUGIN}" \
-        --cloud-provider=${CLOUD_PROVIDER} \
         --ecr-password="${ECR_PASSWORD}" \
         --custom-image="${TARGET_IMAGE}" \
         --kubernetes-version="${KUBERNETES_VERSION}" \
