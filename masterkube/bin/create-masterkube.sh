@@ -61,13 +61,6 @@ export LAUNCH_CA=YES
 
 source ${CURDIR}/aws.defs
 
-# Use public IP address only if we run autoscaler outside AWS
-if [ "${LAUNCH_CA}" != "YES" ]; then
-    export AUTOSCALER_USE_PUBLICIP=true
-else
-    export AUTOSCALER_USE_PUBLICIP=false
-fi
-
 SSH_OPTIONS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
 
 if [ "${OSDISTRO}" == "Linux" ]; then
@@ -605,7 +598,6 @@ AUTOSCALER_CONFIG=$(cat <<EOF
                 }
             ],
             "network": {
-                "autoScalerUsePublicIP": ${AUTOSCALER_USE_PUBLICIP},
                 "eni": [
                     {
                         "subnet": "${VPC_WORKER_SUBNET_ID}",
