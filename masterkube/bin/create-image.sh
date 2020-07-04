@@ -161,6 +161,13 @@ systemctl disable apparmor
 mkdir -p /opt/cni/bin
 mkdir -p /usr/local/bin
 
+# Set NTP server
+echo "set NTP server"
+sed -i '/^NTP/d' /etc/systemd/timesyncd.conf
+echo "NTP=169.254.169.123" >>/etc/systemd/timesyncd.conf
+timedatectl set-timezone UTC
+systemctl restart systemd-timesyncd.service
+
 # Add some EKS init 
 if [ $CNI_PLUGIN = "aws" ]; then
     mkdir -p /etc/eks
