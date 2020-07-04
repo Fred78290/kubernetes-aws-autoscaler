@@ -206,14 +206,17 @@ SHELL
 elif [ $CNI_PLUGIN = "aws" ]; then        
     cat > /etc/docker/daemon.json <<SHELL
     {
-    "bridge": "none",
-    "log-driver": "json-file",
-    "log-opts": {
-        "max-size": "10m",
-        "max-file": "10"
-    },
-    "live-restore": true,
-    "max-concurrent-downloads": 10
+        "exec-opts": [
+            "native.cgroupdriver=systemd"
+        ],
+        "bridge": "none",
+        "log-driver": "json-file",
+        "log-opts": {
+            "max-size": "10m",
+            "max-file": "10"
+        },
+        "live-restore": true,
+        "max-concurrent-downloads": 10
     }
 SHELL
 fi
