@@ -37,6 +37,7 @@ func createTestNode(ng *AutoScalerServerNodeGroup) *AutoScalerServerNode {
 	return &AutoScalerServerNode{
 		ProviderID:   ng.providerIDForNode(testNodeName),
 		NodeGroupID:  testGroupID,
+		InstanceName: testNodeName,
 		NodeName:     testNodeName,
 		InstanceType: "t2.small",
 		Disk:         5120,
@@ -182,7 +183,7 @@ func Test_AutoScalerNodeGroup_deleteNode(t *testing.T) {
 
 	if assert.NoError(t, err) {
 		t.Run("Delete VM", func(t *testing.T) {
-			if err := ng.deleteNodeByName(testNode.NodeName); err != nil {
+			if err := ng.deleteNodeByName(testNode.InstanceName); err != nil {
 				t.Errorf("AutoScalerServerNodeGroup.deleteNode() error = %vv", err)
 			}
 		})

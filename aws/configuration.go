@@ -49,8 +49,7 @@ type Tag struct {
 
 // Network declare network configuration
 type Network struct {
-	AutoScalerUsePublicIPAddress bool  `json:"autoScalerUsePublicIP"`
-	ENI                          []Eni `json:"eni"`
+	ENI []Eni `json:"eni"`
 }
 
 // Eni decalre ENI interface

@@ -21,6 +21,7 @@ export ROOT_IMG_NAME=bionic-kubernetes
 export CNI_VERSION=v0.6.0
 export CNI_PLUGIN_VERSION=v0.8.6
 export CNI_PLUGIN=aws
+export CLOUD_PROVIDER=aws
 export TARGET_IMAGE="${ROOT_IMG_NAME}-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}"
 export MINNODES=0
 export MAXNODES=5
@@ -41,25 +42,24 @@ export TRANSPORT="tcp"
 export SSH_KEYNAME="aws-k8s-key"
 export VOLUME_SIZE=10
 export MAX_PODS=110
+export MASTER_PROFILE_NAME="kubernetes-master-profile"
+export WORKER_PROFILE_NAME="kubernetes-worker-profile"
 
 export SEED_USER="<to be filled>"
 export SEED_IMAGE="<to be filled>"
-export IAM_ROLE_ARN="<to be filled>"
-export VPC_ID="<to be filled>"
-export VPC_SUBNET_ID="<to be filled>"
-export VPC_SECURITY_GROUPID="<to be filled>"
-export VPC_USE_PUBLICIP=true
+export MASTER_INSTANCE_PROFILE_ARN="<to be filled>"
+export WORKER_INSTANCE_PROFILE_ARN="<to be filled>"
+export VPC_MASTER_SUBNET_ID="<to be filled>"
+export VPC_MASTER_SECURITY_GROUPID="<to be filled>"
+export VPC_WORKER_SUBNET_ID="<to be filled>"
+export VPC_WORKER_SECURITY_GROUPID="<to be filled>"
+
+export VPC_MASTER_USE_PUBLICIP=true
+export VPC_WORKER_USE_PUBLICIP=false
 
 export LAUNCH_CA=YES
 
 source ${CURDIR}/aws.defs
-
-# Use public IP address only if we run autoscaler outside AWS
-if [ "${LAUNCH_CA}" != "YES" ]; then
-    export AUTOSCALER_USE_PUBLICIP=true
-else
-    export AUTOSCALER_USE_PUBLICIP=false
-fi
 
 SSH_OPTIONS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
 
@@ -71,7 +71,7 @@ else
     BASE64="base64"
 fi
 
-TEMP=$(getopt -o p:r:k:n:p:s:t: --long max-pods:,profile:,region:,node-group:,target-image:,seed-image:,seed-user:,vpc-id:,subnet-id:,sg-id:,transport:,ssh-private-key:,cni-version:,cni-plugin-version:,kubernetes-version:,max-nodes-total:,cores-total:,memory-total:,max-autoprovisioned-node-group-count:,scale-down-enabled:,scale-down-delay-after-add:,scale-down-delay-after-delete:,scale-down-delay-after-failure:,scale-down-unneeded-time:,scale-down-unready-time:,unremovable-node-recheck-timeout: -n "$0" -- "$@")
+TEMP=$(getopt -o p:r:k:n:p:s:t: --long cloud-provider:,max-pods:,profile:,region:,node-group:,target-image:,seed-image:,seed-user:,vpc-id:,public-subnet-id:,public-sg-id:,private-subnet-id:,private-sg-id:,transport:,ssh-private-key:,cni-version:,cni-plugin-version:,kubernetes-version:,max-nodes-total:,cores-total:,memory-total:,max-autoprovisioned-node-group-count:,scale-down-enabled:,scale-down-delay-after-add:,scale-down-delay-after-delete:,scale-down-delay-after-failure:,scale-down-unneeded-time:,scale-down-unready-time:,unremovable-node-recheck-timeout: -n "$0" -- "$@")
 
 eval set -- "${TEMP}"
 
@@ -114,18 +114,23 @@ while true; do
         shift 2
         ;;
 
-    --vpc-id)
-        VPC_ID="$2"
+    --public-subnet-id)
+        VPC_MASTER_SUBNET_ID="$2"
         shift 2
         ;;
 
-    --subnet-id)
-        VPC_SUBNET_ID="$2"
+    --public-sg-id)
+        VPC_MASTER_SECURITY_GROUPID="$2"
         shift 2
         ;;
 
-    --sg-id)
-        VPC_SECURITY_GROUPID="$2"
+    --private-subnet-id)
+        VPC_WORKER_SUBNET_ID="$2"
+        shift 2
+        ;;
+
+    --private-sg-id)
+        VPC_WORKER_SECURITY_GROUPID="$2"
         shift 2
         ;;
 
@@ -210,6 +215,9 @@ while true; do
     esac
 done
 
+pushd ${CURDIR}/../
+
+# If we use AWS CNI, install eni-max-pods.txt definition file
 if [ $CNI_PLUGIN = "aws" ]; then
     AWS_MAX_PODS=$(curl -s "https://raw.githubusercontent.com/awslabs/amazon-eks-ami/master/files/eni-max-pods.txt" | grep ^${DEFAULT_MACHINE} | awk '{print $2}')
 
@@ -218,6 +226,46 @@ if [ $CNI_PLUGIN = "aws" ]; then
     else
         MAX_PODS=${AWS_MAX_PODS}
     fi
+fi
+
+# If no master instance profile defined, use the default
+if [ -z $MASTER_INSTANCE_PROFILE_ARN ]; then
+    MASTER_INSTANCE_PROFILE_ARN=$(aws iam get-instance-profile --profile ${AWS_PROFILE} --region ${AWS_REGION} --instance-profile-name ${MASTER_PROFILE_NAME} 2> /dev/null | jq '.InstanceProfile.Arn' | tr -d '"')
+
+    # If not found, create it
+    if [ -z $MASTER_INSTANCE_PROFILE_ARN ]; then
+        aws iam create-role --profile ${AWS_PROFILE} --region ${AWS_REGION} --role-name ${MASTER_PROFILE_NAME} --assume-role-policy-document file://templates/profile/master/trusted.json &> /dev/null
+        aws iam put-role-policy --profile ${AWS_PROFILE} --region ${AWS_REGION} --role-name ${MASTER_PROFILE_NAME} --policy-name kubernetes-master-permissions --policy-document file://templates/profile/master/permissions.json &> /dev/null
+        aws iam create-instance-profile --profile ${AWS_PROFILE} --region ${AWS_REGION} --instance-profile-name ${MASTER_PROFILE_NAME} &> /dev/null
+        aws iam add-role-to-instance-profile --profile ${AWS_PROFILE} --region ${AWS_REGION} --instance-profile-name ${MASTER_PROFILE_NAME} --role-name ${MASTER_PROFILE_NAME} &> /dev/null
+
+        MASTER_INSTANCE_PROFILE_ARN=$(aws iam get-instance-profile --profile ${AWS_PROFILE} --region ${AWS_REGION} --instance-profile-name ${MASTER_PROFILE_NAME} | jq '.InstanceProfile.Arn' | tr -d '"')
+    fi
+fi
+
+# If no worker instance profile defined, use the default
+if [ -z $WORKER_INSTANCE_PROFILE_ARN ]; then
+    WORKER_INSTANCE_PROFILE_ARN=$(aws iam get-instance-profile --profile ${AWS_PROFILE} --region ${AWS_REGION} --instance-profile-name ${WORKER_PROFILE_NAME} 2> /dev/null | jq '.InstanceProfile.Arn' | tr -d '"')
+
+    # If not found, create it
+    if [ -z $WORKER_INSTANCE_PROFILE_ARN ]; then
+        aws iam create-role --profile ${AWS_PROFILE} --region ${AWS_REGION} --role-name ${WORKER_PROFILE_NAME} --assume-role-policy-document file://templates/profile/worker/trusted.json &> /dev/null
+        aws iam put-role-policy --profile ${AWS_PROFILE} --region ${AWS_REGION} --role-name ${WORKER_PROFILE_NAME} --policy-name kubernetes-worker-permissions --policy-document file://templates/profile/worker/permissions.json &> /dev/null
+        aws iam create-instance-profile --profile ${AWS_PROFILE} --region ${AWS_REGION} --instance-profile-name ${WORKER_PROFILE_NAME} &> /dev/null
+        aws iam add-role-to-instance-profile --profile ${AWS_PROFILE} --region ${AWS_REGION} --instance-profile-name ${WORKER_PROFILE_NAME} --role-name ${WORKER_PROFILE_NAME} &> /dev/null
+
+        WORKER_INSTANCE_PROFILE_ARN=$(aws iam get-instance-profile --profile ${AWS_PROFILE} --region ${AWS_REGION} --instance-profile-name ${WORKER_PROFILE_NAME} | jq '.InstanceProfile.Arn' | tr -d '"')
+    fi
+fi
+
+TAGGED=$(aws ec2 describe-subnets --profile ${AWS_PROFILE} --region ${AWS_REGION} --filters "Name=subnet-id,Values=${VPC_MASTER_SUBNET_ID}" | jq ".Subnets[].Tags[]|select(.Key == \"kubernetes.io/cluster/${NODEGROUP_NAME}\")|.Value" | tr -d '"')
+if [ -z $TAGGED ]; then
+    aws ec2 create-tags --profile ${AWS_PROFILE} --region ${AWS_REGION} --resources ${VPC_MASTER_SUBNET_ID} --tags "Key=kubernetes.io/cluster/${NODEGROUP_NAME},Value=owned" 2> /dev/null
+fi
+
+TAGGED=$(aws ec2 describe-subnets --profile ${AWS_PROFILE} --region ${AWS_REGION} --filters "Name=subnet-id,Values=$VPC_WORKER_SUBNET_ID" | jq ".Subnets[].Tags[]|select(.Key == \"kubernetes.io/cluster/${NODEGROUP_NAME}\")|.Value" | tr -d '"')
+if [ -z $TAGGED ]; then
+    aws ec2 create-tags --profile ${AWS_PROFILE} --region ${AWS_REGION} --resources ${VPC_WORKER_SUBNET_ID} --tags "Key=kubernetes.io/cluster/${NODEGROUP_NAME},Value=owned" 2> /dev/null
 fi
 
 TARGET_IMAGE="${ROOT_IMG_NAME}-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}"
@@ -271,7 +319,6 @@ fi
 
 echo "Transport set to:${TRANSPORT}, listen endpoint at ${LISTEN}"
 
-pushd ${CURDIR}/../
 
 [ -d config ] || mkdir -p config
 [ -d cluster ] || mkdir -p cluster
@@ -309,10 +356,9 @@ if [ -z "${TARGET_IMAGE_AMI}" ]; then
         --user="${SEED_USER}" \
         --ssh-key="${SSH_KEY}" \
         --ssh-key-name="${SSH_KEYNAME}" \
-        --vpc-id="${VC_NETWORK_PUBLIC}" \
-        --subnet-id="${VPC_SUBNET_ID}" \
-        --sg-id="${VPC_SECURITY_GROUPID}" \
-        --use-public-ip="${VPC_USE_PUBLICIP}"
+        --subnet-id="${VPC_MASTER_SUBNET_ID}" \
+        --sg-id="${VPC_MASTER_SECURITY_GROUPID}" \
+        --use-public-ip="${VPC_MASTER_USE_PUBLICIP}"
 fi
 
 export TARGET_IMAGE_AMI=$(aws ec2 describe-images --profile ${AWS_PROFILE} --region ${AWS_REGION} --filters "Name=name,Values=${TARGET_IMAGE}" | jq '.Images[0].ImageId' | tr -d '"' | sed -e 's/null//g')
@@ -329,6 +375,7 @@ echo "Launch custom ${MASTERKUBE} instance with ${TARGET_IMAGE}"
 
 # Cloud init user-data
 echo "#cloud-config" >./config/userdata.yaml
+
 cat <<EOF | python2 -c "import json,sys,yaml; print yaml.safe_dump(json.load(sys.stdin), width=500, indent=4, default_flow_style=False)" >>./config/userdata.yaml
 {
     "runcmd": [
@@ -352,7 +399,7 @@ cat > ./config/mapping.json <<EOF
 ]
 EOF
 
-if [ "${VPC_USE_PUBLICIP}" == "true" ]; then
+if [ "${VPC_MASTER_USE_PUBLICIP}" == "true" ]; then
     PUBLIC_IP_OPTIONS=--associate-public-ip-address
 else
     PUBLIC_IP_OPTIONS=--no-associate-public-ip-address
@@ -366,10 +413,10 @@ LAUNCHED_INSTANCE=$(aws ec2 run-instances \
     --count 1  \
     --instance-type "${DEFAULT_MACHINE}" \
     --key-name "${SSH_KEYNAME}" \
-    --subnet-id "${VPC_SUBNET_ID}" \
-    --security-group-ids "${VPC_SECURITY_GROUPID}" \
+    --subnet-id "${VPC_MASTER_SUBNET_ID}" \
+    --security-group-ids "${VPC_MASTER_SECURITY_GROUPID}" \
     --user-data "file://config/userdata.yaml" \
-    --iam-instance-profile "Arn=${IAM_ROLE_ARN}" \
+    --iam-instance-profile "Arn=${MASTER_INSTANCE_PROFILE_ARN}" \
     --block-device-mappings "file://config/mapping.json" \
     --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${MASTERKUBE}},{Key=NodeGroup,Value=${NODEGROUP_NAME}},{Key=kubernetes.io/cluster/${NODEGROUP_NAME},Value=owned},{Key=KubernetesCluster,Value=${NODEGROUP_NAME}}]" \
     ${PUBLIC_IP_OPTIONS})
@@ -395,7 +442,7 @@ echo
 
 LAUNCHED_INSTANCE=$(aws ec2  describe-instances --profile ${AWS_PROFILE} --region ${AWS_REGION} --instance-ids ${LAUNCHED_ID} | jq .Reservations[0].Instances[0])
 
-if [ "${VPC_USE_PUBLICIP}" == "true" ]; then
+if [ "${VPC_MASTER_USE_PUBLICIP}" == "true" ]; then
     export IPADDR=$(echo ${LAUNCHED_INSTANCE} | jq '.PublicIpAddress' | tr -d '"' | sed -e 's/null//g')
     CERT_EXTRA_SANS="--cert-extra-sans ${IPADDR},${MASTERKUBE}.${DOMAIN_NAME},masterkube.${DOMAIN_NAME},masterkube-dashboard.${DOMAIN_NAME}"
     IP_TYPE="public"
@@ -421,7 +468,7 @@ scp ${SSH_OPTIONS} -r ../masterkube ${SEED_USER}@${IPADDR}:~
 
 echo "Start kubernetes ${MASTERKUBE} instance master node, kubernetes version=${KUBERNETES_VERSION}, providerID=${PROVIDERID}"
 ssh ${SSH_OPTIONS} ${SEED_USER}@${IPADDR} sudo cp /home/${SEED_USER}/masterkube/bin/* /usr/local/bin
-ssh ${SSH_OPTIONS} ${SEED_USER}@${IPADDR} sudo create-cluster.sh --max-pods ${MAX_PODS} --cni-plugin "${CNI_PLUGIN}" --kubernetes-version "${KUBERNETES_VERSION}" --node-group "${NODEGROUP_NAME}" ${CERT_EXTRA_SANS}
+ssh ${SSH_OPTIONS} ${SEED_USER}@${IPADDR} sudo create-cluster.sh --max-pods ${MAX_PODS} --cloud-provider=${CLOUD_PROVIDER} --cni-plugin "${CNI_PLUGIN}" --kubernetes-version "${KUBERNETES_VERSION}" --node-group "${NODEGROUP_NAME}" ${CERT_EXTRA_SANS}
 
 scp ${SSH_OPTIONS} ${SEED_USER}@${IPADDR}:/etc/cluster/* ./cluster
 
@@ -440,8 +487,6 @@ MASTER_IP=$(cat ./cluster/manager-ip)
 TOKEN=$(cat ./cluster/token)
 CACERT=$(cat ./cluster/ca.cert)
 
-kubectl annotate node ${MASTERKUBE} "cluster.autoscaler.nodegroup/name=${NODEGROUP_NAME}" "cluster.autoscaler.nodegroup/instance-id=${LAUNCHED_ID}" "cluster.autoscaler.nodegroup/node-index=0" "cluster.autoscaler.nodegroup/autoprovision=false" "cluster-autoscaler.kubernetes.io/scale-down-disabled=true" --overwrite --kubeconfig=./cluster/config
-kubectl label nodes ${MASTERKUBE} "cluster.autoscaler.nodegroup/name=${NODEGROUP_NAME}" "master=true" --overwrite --kubeconfig=./cluster/config
 kubectl create secret tls kube-system -n kube-system --key ./etc/ssl/privkey.pem --cert ./etc/ssl/fullchain.pem --kubeconfig=./cluster/config
 
 kubeconfig-merge.sh ${MASTERKUBE} ./cluster/config
@@ -463,6 +508,7 @@ AUTOSCALER_CONFIG=$(cat <<EOF
     "nodePrice": 0.0,
     "podPrice": 0.0,
     "image": "${TARGET_IMAGE}",
+    "cloud-provider": "${CLOUD_PROVIDER}",
     "optionals": {
         "pricing": true,
         "getAvailableMachineTypes": true,
@@ -543,7 +589,7 @@ AUTOSCALER_CONFIG=$(cat <<EOF
             "region" : "${AWS_REGION}",
             "keyName": "${SSH_KEYNAME}",
             "ami": "${TARGET_IMAGE_AMI}",
-            "iam-role-arn": "${IAM_ROLE_ARN}",
+            "iam-role-arn": "${WORKER_INSTANCE_PROFILE_ARN}",
             "timeout": 120,
             "tags": [
                 {
@@ -552,12 +598,11 @@ AUTOSCALER_CONFIG=$(cat <<EOF
                 }
             ],
             "network": {
-                "autoScalerUsePublicIP": ${AUTOSCALER_USE_PUBLICIP},
                 "eni": [
                     {
-                        "subnet": "${VPC_SUBNET_ID}",
-                        "securityGroup": "${VPC_SECURITY_GROUPID}",
-                        "publicIP": ${VPC_USE_PUBLICIP}
+                        "subnet": "${VPC_WORKER_SUBNET_ID}",
+                        "securityGroup": "${VPC_WORKER_SECURITY_GROUPID}",
+                        "publicIP": ${VPC_WORKER_USE_PUBLICIP}
                     }
                 ]
             }

@@ -48,7 +48,7 @@ func newTestServer(addNodeGroup, addTestNode bool) (*AutoScalerServerApp, *AutoS
 			if addTestNode {
 				node := createTestNode(ng)
 
-				ng.Nodes[node.NodeName] = node
+				ng.Nodes[node.InstanceName] = node
 			}
 		}
 
