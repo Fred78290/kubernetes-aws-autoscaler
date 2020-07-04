@@ -184,7 +184,8 @@ func (vm *AutoScalerServerNode) kubeAdmJoin() error {
 		args = append(args, kubeAdm.ExtraArguments...)
 	}
 
-	if _, err := utils.Sudo(vm.serverConfig.SSH, vm.Addresses[0], vm.AwsConfig.Timeout, strings.Join(args, " ")); err != nil {
+	if output, err := utils.Sudo(vm.serverConfig.SSH, vm.Addresses[0], vm.AwsConfig.Timeout, strings.Join(args, " ")); err != nil {
+		glog.Errorf("Kubeadm join %s %s return an error: %s", vm.InstanceName, vm.NodeGroupID, output)
 		return err
 	}
 
@@ -329,6 +330,8 @@ func (vm *AutoScalerServerNode) CheckIfIPIsReady(nodename, address string) error
 		}
 
 		vm.NodeName = nodeName
+
+		glog.V(5).Infof("Launch VM:%s set to nodeName: %s", nodename, nodeName)
 	}
 
 	return nil
