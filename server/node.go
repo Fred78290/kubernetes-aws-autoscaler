@@ -173,6 +173,8 @@ func (vm *AutoScalerServerNode) kubeAdmJoin() error {
 		"kubeadm",
 		"join",
 		kubeAdm.Address,
+		"--node-name",
+		vm.NodeName,
 		"--token",
 		kubeAdm.Token,
 		"--discovery-token-ca-cert-hash",
