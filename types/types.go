@@ -110,6 +110,7 @@ type AutoScalerServerConfig struct {
 	SyncFolders        *AutoScalerServerSyncFolders      `json:"sync-folder"`                           // Optional, do rsync between host and guest
 	Optionals          *AutoScalerServerOptionals        `json:"optionals"`
 	SSH                *AutoScalerServerSSH              `json:"ssh-infos"`
+	CloudProvider      string                            `json:"cloud-provider"`
 	AwsInfos           map[string]*aws.Configuration     `json:"aws"`
 }
 

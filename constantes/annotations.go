@@ -15,6 +15,9 @@ const (
 	// AnnotationInstanceID k8s annotation
 	AnnotationInstanceID = "cluster.autoscaler.nodegroup/instance-id"
 
+	// AnnotationInstanceName k8s annotation
+	AnnotationInstanceName = "cluster.autoscaler.nodegroup/instance-name"
+
 	// AnnotationNodeIndex k8s annotation
 	AnnotationNodeIndex = "cluster.autoscaler.nodegroup/node-index"
 

@@ -69,7 +69,7 @@ func (g *AutoScalerServerNodeGroup) cleanup() error {
 
 	for _, node := range g.Nodes {
 		if lastError = node.deleteVM(); lastError != nil {
-			glog.Errorf(constantes.ErrNodeGroupCleanupFailOnVM, g.NodeGroupIdentifier, node.NodeName, lastError)
+			glog.Errorf(constantes.ErrNodeGroupCleanupFailOnVM, g.NodeGroupIdentifier, node.InstanceName, lastError)
 		}
 	}
 
@@ -131,14 +131,14 @@ func (g *AutoScalerServerNodeGroup) deleteNodes(delta int) error {
 			tempNodes = append(tempNodes, node)
 
 			if err = node.deleteVM(); err != nil {
-				glog.Errorf(constantes.ErrUnableToDeleteVM, node.NodeName, err)
+				glog.Errorf(constantes.ErrUnableToDeleteVM, node.InstanceName, err)
 				break
 			}
 		}
 	}
 
 	for _, node := range tempNodes {
-		delete(g.Nodes, node.NodeName)
+		delete(g.Nodes, node.InstanceName)
 	}
 
 	return err
@@ -168,6 +168,7 @@ func (g *AutoScalerServerNodeGroup) addNodes(delta int) error {
 			node := &AutoScalerServerNode{
 				ProviderID:       g.providerIDForNode(nodeName),
 				NodeGroupID:      g.NodeGroupIdentifier,
+				InstanceName:     nodeName,
 				NodeName:         nodeName,
 				NodeIndex:        g.LastCreatedNodeIndex,
 				InstanceType:     g.InstanceType,
@@ -183,7 +184,7 @@ func (g *AutoScalerServerNodeGroup) addNodes(delta int) error {
 				g.pendingNodes = make(map[string]*AutoScalerServerNode)
 			}
 
-			g.pendingNodes[node.NodeName] = node
+			g.pendingNodes[node.InstanceName] = node
 		} else {
 			return fmt.Errorf("Unable to find node group named %s", g.NodeGroupIdentifier)
 		}
@@ -226,13 +227,13 @@ func (g *AutoScalerServerNodeGroup) addNodes(delta int) error {
 					returnValue.err = node.launchVM(g.NodeLabels, g.SystemLabels)
 
 					// Remove from pending
-					delete(g.pendingNodes, node.NodeName)
+					delete(g.pendingNodes, node.InstanceName)
 
 					if returnValue.err != nil {
 						node.cleanOnLaunchError(returnValue.err)
 					} else {
 						// Add node to running nodes
-						g.Nodes[node.NodeName] = node
+						g.Nodes[node.InstanceName] = node
 					}
 
 					// Pending node effective removed
@@ -267,12 +268,12 @@ func (g *AutoScalerServerNodeGroup) addNodes(delta int) error {
 	} else {
 		node := tempNodes[0]
 
-		delete(g.pendingNodes, node.NodeName)
+		delete(g.pendingNodes, node.InstanceName)
 
 		if err = node.launchVM(g.NodeLabels, g.SystemLabels); err != nil {
 			node.cleanOnLaunchError(err)
 		} else {
-			g.Nodes[node.NodeName] = node
+			g.Nodes[node.InstanceName] = node
 		}
 
 		g.pendingNodesWG.Done()
@@ -315,7 +316,7 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(scaleDownDisabled bool, k
 
 	for _, nodeInfo := range nodeInfos.Items {
 		var providerID = utils.GetNodeProviderID(g.ServiceIdentifier, &nodeInfo)
-		var nodeID = ""
+		var instanceName = ""
 
 		if len(providerID) > 0 {
 			out, err = utils.NodeGroupIDFromProviderID(g.ServiceIdentifier, providerID)
@@ -323,9 +324,8 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(scaleDownDisabled bool, k
 			if out == g.NodeGroupIdentifier {
 				glog.Infof("Discover node:%s matching nodegroup:%s", providerID, g.NodeGroupIdentifier)
 
-				if nodeID, err = utils.NodeNameFromProviderID(g.ServiceIdentifier, providerID); err == nil {
-					node := formerNodes[nodeID]
-
+				if instanceName, err = utils.NodeNameFromProviderID(g.ServiceIdentifier, providerID); err == nil {
+					node := formerNodes[instanceName]
 					runningIP := ""
 
 					for _, address := range nodeInfo.Status.Addresses {
@@ -341,15 +341,17 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(scaleDownDisabled bool, k
 
 					g.LastCreatedNodeIndex = utils.MaxInt(g.LastCreatedNodeIndex, lastNodeIndex)
 
-					if ec2Instance, err = aws.GetEc2Instance(awsConfig, nodeInfo.Name); err == nil {
+					// Node name and instance name could be differ when using AWS cloud provider
+					if ec2Instance, err = aws.GetEc2Instance(awsConfig, instanceName); err == nil {
 
 						if node == nil {
-							glog.Infof("Add node:%s with IP:%s to nodegroup:%s", nodeID, runningIP, g.NodeGroupIdentifier)
+							glog.Infof("Add node:%s with IP:%s to nodegroup:%s", instanceName, runningIP, g.NodeGroupIdentifier)
 
 							node = &AutoScalerServerNode{
 								ProviderID:       providerID,
 								NodeGroupID:      g.NodeGroupIdentifier,
-								NodeName:         nodeID,
+								InstanceName:     instanceName,
+								NodeName:         nodeInfo.Name,
 								NodeIndex:        lastNodeIndex,
 								State:            AutoScalerServerNodeStateRunning,
 								AutoProvisionned: nodeInfo.Annotations[constantes.AnnotationNodeAutoProvisionned] == "true",
@@ -367,6 +369,7 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(scaleDownDisabled bool, k
 								"node",
 								nodeInfo.Name,
 								fmt.Sprintf("%s=%s", constantes.AnnotationScaleDownDisabled, strconv.FormatBool(scaleDownDisabled && node.AutoProvisionned == false)),
+								fmt.Sprintf("%s=%s", constantes.AnnotationInstanceName, instanceName),
 								fmt.Sprintf("%s=%s", constantes.AnnotationInstanceID, *ec2Instance.InstanceID),
 								fmt.Sprintf("%s=%s", constantes.AnnotationNodeAutoProvisionned, strconv.FormatBool(node.AutoProvisionned)),
 								fmt.Sprintf("%s=%d", constantes.AnnotationNodeIndex, node.NodeIndex),
@@ -397,11 +400,11 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(scaleDownDisabled bool, k
 							node.RunningInstance = ec2Instance
 							node.serverConfig = g.configuration
 
-							glog.Infof("Attach existing node:%s with IP:%s to nodegroup:%s", nodeID, runningIP, g.NodeGroupIdentifier)
+							glog.Infof("Attach existing node:%s with IP:%s to nodegroup:%s", instanceName, runningIP, g.NodeGroupIdentifier)
 						}
 
 					} else {
-						glog.Errorf("Can not add node:%s with IP:%s to nodegroup:%s, reason: %v", nodeID, runningIP, g.NodeGroupIdentifier, err)
+						glog.Errorf("Can not add node:%s with IP:%s to nodegroup:%s, reason: %v", instanceName, runningIP, g.NodeGroupIdentifier, err)
 
 						node = nil
 					}
@@ -409,7 +412,7 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(scaleDownDisabled bool, k
 					lastNodeIndex++
 
 					if node != nil {
-						g.Nodes[nodeID] = node
+						g.Nodes[instanceName] = node
 
 						node.statusVM()
 					}
@@ -429,7 +432,7 @@ func (g *AutoScalerServerNodeGroup) deleteNodeByName(nodeName string) error {
 	if node := g.Nodes[nodeName]; node != nil {
 
 		if err = node.deleteVM(); err != nil {
-			glog.Errorf(constantes.ErrUnableToDeleteVM, node.NodeName, err)
+			glog.Errorf(constantes.ErrUnableToDeleteVM, node.InstanceName, err)
 		}
 
 		delete(g.Nodes, nodeName)
