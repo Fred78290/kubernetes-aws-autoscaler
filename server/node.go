@@ -339,12 +339,37 @@ func (vm *AutoScalerServerNode) CheckIfIPIsReady(nodename, address string) error
 	return nil
 }
 
+func (vm *AutoScalerServerNode) registerDNS(address string) error {
+	var err error
+
+	aws := vm.AwsConfig
+
+	if aws.Network.ZoneID != nil {
+		err = vm.RunningInstance.RegisterDNS(*aws.Network.ZoneID, fmt.Sprintf("%s.%s", vm.InstanceName, *aws.Network.PrivateZoneName), address, false)
+	}
+
+	return err
+}
+
+func (vm *AutoScalerServerNode) unregisterDNS(address string) error {
+	var err error
+
+	aws := vm.AwsConfig
+
+	if aws.Network.ZoneID != nil {
+		err = vm.RunningInstance.UnRegisterDNS(*aws.Network.ZoneID, fmt.Sprintf("%s.%s", vm.InstanceName, *aws.Network.PrivateZoneName), address, false)
+	}
+
+	return err
+}
+
 func (vm *AutoScalerServerNode) launchVM(nodeLabels, systemLabels KubernetesLabel) error {
 	glog.V(5).Infof("AutoScalerNode::launchVM, node:%s", vm.InstanceName)
 
 	var err error
 	var status AutoScalerServerNodeState
 	var output string
+	var address *string
 
 	aws := vm.AwsConfig
 
@@ -362,9 +387,13 @@ func (vm *AutoScalerServerNode) launchVM(nodeLabels, systemLabels KubernetesLabe
 
 		err = fmt.Errorf(constantes.ErrUnableToLaunchVM, vm.InstanceName, err)
 
-	} else if _, err = vm.RunningInstance.WaitForIP(vm); err != nil {
+	} else if address, err = vm.RunningInstance.WaitForIP(vm); err != nil {
 
 		err = fmt.Errorf(constantes.ErrStartVMFailed, vm.InstanceName, err)
+
+	} else if err = vm.registerDNS(*address); err != nil {
+
+		err = fmt.Errorf(constantes.ErrRegisterDNSVMFailed, vm.InstanceName, err)
 
 	} else if status, err = vm.statusVM(); err != nil {
 
@@ -534,6 +563,8 @@ func (vm *AutoScalerServerNode) deleteVM() error {
 		kubeconfig := vm.serverConfig.KubeConfig
 
 		if status, err = vm.RunningInstance.Status(); err == nil {
+			vm.unregisterDNS(status.Address)
+
 			if status.Powered {
 				args := []string{
 					"kubectl",

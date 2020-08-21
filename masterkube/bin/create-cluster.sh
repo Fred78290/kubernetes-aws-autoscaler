@@ -4,12 +4,12 @@ set -e
 
 export CNI_PLUGIN=aws
 export CLOUD_PROVIDER=aws
-export KUBERNETES_VERSION=v1.18.3
+export KUBERNETES_VERSION=v1.18.6
 export CLUSTER_DIR=/etc/cluster
 export SCHEME="aws"
 export NODEGROUP_NAME="aws-ca-k8s"
 export MASTERKUBE="${NODEGROUP_NAME}-masterkube"
-export PROVIDERID="${SCHEME}://${NODEGROUP_NAME}/object?type=node&name=${HOSTNAME}"
+export PROVIDERID="${SCHEME}://${NODEGROUP_NAME}/object?type=node&name=${MASTERKUBE}"
 export IPADDR=$(curl http://169.254.169.254/latest/meta-data/local-ipv4)
 export LOCALHOSTNAME=$(curl -s http://169.254.169.254/latest/meta-data/local-hostname)
 export INSTANCEID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
@@ -30,8 +30,10 @@ export SERVICE_NETWORK_CIDR="10.96.0.0/12"
 export CLUSTER_DNS="10.96.0.10"
 export CERT_EXTRA_SANS=
 export MAX_PODS=110
+export PRIVATE_DOMAIN_NAME=
+export ROUTE53_ZONEID=
 
-TEMP=$(getopt -o p:n:c:k:s: --long cloud-provider:,max-pods:,node-group:,cert-extra-sans:,cni-plugin:,kubernetes-version: -n "$0" -- "$@")
+TEMP=$(getopt -o p:n:c:k:s: --long private-zone-id:,private-zone-name:,cloud-provider:,max-pods:,node-group:,cert-extra-sans:,cni-plugin:,kubernetes-version: -n "$0" -- "$@")
 
 eval set -- "${TEMP}"
 
@@ -45,7 +47,7 @@ while true; do
     -n | --node-group)
         NODEGROUP_NAME="$2"
         MASTERKUBE="${NODEGROUP_NAME}-masterkube"
-        PROVIDERID="${SCHEME}://${NODEGROUP_NAME}/object?type=node&name=${HOSTNAME}"
+        PROVIDERID="${SCHEME}://${NODEGROUP_NAME}/object?type=node&name=${MASTERKUBE}"
         shift 2
         ;;
 
@@ -68,6 +70,17 @@ while true; do
         CLOUD_PROVIDER="$2"
         shift 2
         ;;
+
+    --private-zone-id)
+        ROUTE53_ZONEID="$2"
+        shift 2
+        ;;
+
+    --private-zone-name)
+        PRIVATE_DOMAIN_NAME="$2"
+        shift 2
+        ;;
+
     --)
         shift
         break
