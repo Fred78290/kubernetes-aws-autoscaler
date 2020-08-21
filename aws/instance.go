@@ -9,9 +9,11 @@ import (
 
 	"github.com/Fred78290/kubernetes-aws-autoscaler/constantes"
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go/service/route53"
 )
 
 // Ec2Instance Running instance
@@ -20,6 +22,7 @@ type Ec2Instance struct {
 	config       *Configuration
 	InstanceName string
 	InstanceID   *string
+	AddressIP    *string
 }
 
 // GetEc2Instance return an existing instance from name
@@ -185,6 +188,8 @@ func (instance *Ec2Instance) WaitForIP(callback CallbackCheckIPReady) (*string, 
 			} else {
 				address = ec2Instance.PrivateIpAddress
 			}
+
+			instance.AddressIP = address
 
 			glog.V(4).Infof("WaitForIP: instance %s id (%s), using IP:%s", instance.InstanceName, instance.getInstanceID(), *address)
 
@@ -454,4 +459,71 @@ func (instance *Ec2Instance) Status() (*Status, error) {
 			return &Status{}, nil
 		}
 	}
+}
+
+func (instance *Ec2Instance) changeResourceRecordSetsInput(cmd, zoneID, name, address string, wait bool) error {
+	svc := route53.New(session.New())
+
+	input := &route53.ChangeResourceRecordSetsInput{
+		ChangeBatch: &route53.ChangeBatch{
+			Changes: []*route53.Change{
+				{
+					Action: aws.String(cmd),
+					ResourceRecordSet: &route53.ResourceRecordSet{
+						Name: aws.String(name),
+						ResourceRecords: []*route53.ResourceRecord{
+							{
+								Value: aws.String(address),
+							},
+						},
+						TTL:  aws.Int64(600),
+						Type: aws.String("A"),
+					},
+				},
+			},
+			Comment: aws.String("Kubernetes worker node"),
+		},
+		HostedZoneId: aws.String(zoneID),
+	}
+
+	result, err := svc.ChangeResourceRecordSets(input)
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			case route53.ErrCodeNoSuchHostedZone:
+				return fmt.Errorf("%s, %v", route53.ErrCodeNoSuchHostedZone, aerr.Error())
+			case route53.ErrCodeNoSuchHealthCheck:
+				return fmt.Errorf("%s, %v", route53.ErrCodeNoSuchHealthCheck, aerr.Error())
+			case route53.ErrCodeInvalidChangeBatch:
+				return fmt.Errorf("%s, %v", route53.ErrCodeInvalidChangeBatch, aerr.Error())
+			case route53.ErrCodeInvalidInput:
+				return fmt.Errorf("%s, %v", route53.ErrCodeInvalidInput, aerr.Error())
+			case route53.ErrCodePriorRequestNotComplete:
+				return fmt.Errorf("%s, %v", route53.ErrCodePriorRequestNotComplete, aerr.Error())
+			default:
+				return aerr
+			}
+		} else {
+			return err
+		}
+	}
+
+	if wait {
+		input := &route53.GetChangeInput{
+			Id: result.ChangeInfo.Id,
+		}
+		return svc.WaitUntilResourceRecordSetsChanged(input)
+	}
+
+	return nil
+}
+
+// RegisterDNS register EC2 instance in Route53
+func (instance *Ec2Instance) RegisterDNS(zoneID, name, address string, wait bool) error {
+	return instance.changeResourceRecordSetsInput("UPSERT", zoneID, name, address, wait)
+}
+
+// UnRegisterDNS unregister EC2 instance in Route53
+func (instance *Ec2Instance) UnRegisterDNS(zoneID, name, address string, wait bool) error {
+	return instance.changeResourceRecordSetsInput("DELETE", zoneID, name, address, wait)
 }

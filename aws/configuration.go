@@ -49,7 +49,9 @@ type Tag struct {
 
 // Network declare network configuration
 type Network struct {
-	ENI []Eni `json:"eni"`
+	ZoneID          *string `json:"route53"`
+	PrivateZoneName *string `json:"privateZoneName"`
+	ENI             []Eni   `json:"eni"`
 }
 
 // Eni decalre ENI interface
