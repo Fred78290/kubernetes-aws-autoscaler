@@ -53,11 +53,14 @@ export VPC_MASTER_SUBNET_ID="<to be filled>"
 export VPC_MASTER_SECURITY_GROUPID="<to be filled>"
 export VPC_WORKER_SUBNET_ID="<to be filled>"
 export VPC_WORKER_SECURITY_GROUPID="<to be filled>"
+export ACM_CERTIFICATE_NAME="<to be filled>"
+export ROUTE53_ZONEID="<to be filled>"
 
 export VPC_MASTER_USE_PUBLICIP=true
 export VPC_WORKER_USE_PUBLICIP=false
 
 export LAUNCH_CA=YES
+export PRIVATE_DOMAIN_NAME=
 
 source ${CURDIR}/aws.defs
 
@@ -258,11 +261,13 @@ if [ -z $WORKER_INSTANCE_PROFILE_ARN ]; then
     fi
 fi
 
+# Tag VPC & Subnet
 TAGGED=$(aws ec2 describe-subnets --profile ${AWS_PROFILE} --region ${AWS_REGION} --filters "Name=subnet-id,Values=${VPC_MASTER_SUBNET_ID}" | jq ".Subnets[].Tags[]|select(.Key == \"kubernetes.io/cluster/${NODEGROUP_NAME}\")|.Value" | tr -d '"')
 if [ -z $TAGGED ]; then
     aws ec2 create-tags --profile ${AWS_PROFILE} --region ${AWS_REGION} --resources ${VPC_MASTER_SUBNET_ID} --tags "Key=kubernetes.io/cluster/${NODEGROUP_NAME},Value=owned" 2> /dev/null
 fi
 
+# Tag VPC & Subnet
 TAGGED=$(aws ec2 describe-subnets --profile ${AWS_PROFILE} --region ${AWS_REGION} --filters "Name=subnet-id,Values=$VPC_WORKER_SUBNET_ID" | jq ".Subnets[].Tags[]|select(.Key == \"kubernetes.io/cluster/${NODEGROUP_NAME}\")|.Value" | tr -d '"')
 if [ -z $TAGGED ]; then
     aws ec2 create-tags --profile ${AWS_PROFILE} --region ${AWS_REGION} --resources ${VPC_WORKER_SUBNET_ID} --tags "Key=kubernetes.io/cluster/${NODEGROUP_NAME},Value=owned" 2> /dev/null
@@ -339,6 +344,15 @@ export TARGET_IMAGE_AMI=$(aws ec2 describe-images --profile ${AWS_PROFILE} --reg
 # Extract the domain name from CERT
 export DOMAIN_NAME=$(openssl x509 -noout -subject -in ./etc/ssl/cert.pem | awk -F= '{print $NF}' | sed -e 's/^[ \t]*//' | sed 's/\*\.//g')
 
+export ACM_CERTIFICATE_ARN=$(aws acm list-certificates --profile ${AWS_PROFILE} --region ${AWS_REGION} | jq --arg DOMAIN_NAME ${DOMAIN_NAME} '.CertificateSummaryList[]|select(.DomainName == $DOMAIN_NAME)|.CertificateArn' | tr -d '"' | sed -e 's/null//g')
+
+if [ -z $ACM_CERTIFICATE_ARN ]; then
+    aws acm import-certificate --profile ${AWS_PROFILE} --region ${AWS_REGION} --tags "Key=Name,Value=${ACM_CERTIFICATE_NAME}" \
+        --certificate file://etc/ssl/cert.pem --certificate-chain file://etc/ssl/chain.pem --private-key file://etc/ssl/privkey.pem
+    export ACM_CERTIFICATE_ARN=$(aws acm list-certificates --profile ${AWS_PROFILE} --region ${AWS_REGION} \
+        | jq --arg DOMAIN_NAME ${DOMAIN_NAME} '.CertificateSummaryList[]|select(.DomainName == $DOMAIN_NAME)|.CertificateArn' | tr -d '"' | sed -e 's/null//g')
+fi               
+
 # If the VM template doesn't exists, build it from scrash
 if [ -z "${TARGET_IMAGE_AMI}" ]; then
     echo "Create aws preconfigured image ${TARGET_IMAGE}"
@@ -368,10 +382,23 @@ if [ -d ${TARGET_IMAGE_AMI} ]; then
     exit -1
 fi
 
+# Grab private domain name
+if [ ! -z $ROUTE53_ZONEID ]; then
+    PRIVATE_DOMAIN_NAME=$(aws route53 get-hosted-zone --id  ${ROUTE53_ZONEID} --profile ${AWS_PROFILE} --region ${AWS_REGION} | jq .HostedZone.Name | tr -d '"' | sed -e 's/null//g')
+    PRIVATE_DOMAIN_NAME=${PRIVATE_DOMAIN_NAME::-1}
+fi
+
 # Delete previous exixting version
 delete-masterkube.sh
 
 echo "Launch custom ${MASTERKUBE} instance with ${TARGET_IMAGE}"
+
+# Record Masterkube in Route53 DNS
+if [ -z $ROUTE53_ZONEID ]; then
+    FQHOSTNAME=${MASTERKUBE}
+else
+    FQHOSTNAME=${MASTERKUBE}.${PRIVATE_DOMAIN_NAME}
+fi
 
 # Cloud init user-data
 echo "#cloud-config" >./config/userdata.yaml
@@ -379,8 +406,8 @@ echo "#cloud-config" >./config/userdata.yaml
 cat <<EOF | python2 -c "import json,sys,yaml; print yaml.safe_dump(json.load(sys.stdin), width=500, indent=4, default_flow_style=False)" >>./config/userdata.yaml
 {
     "runcmd": [
-        "echo 'Create ${MASTERKUBE}' > /var/log/masterkube.log",
-        "hostnamectl set-hostname ${MASTERKUBE}"
+        "echo 'Create ${FQHOSTNAME}' > /var/log/masterkube.log",
+        "hostnamectl set-hostname ${FQHOSTNAME}"
     ]
 }
 EOF
@@ -452,11 +479,38 @@ else
     IP_TYPE="private"
 fi
 
+# Record Masterkube in Route53 DNS
+if [ ! -z $ROUTE53_ZONEID ]; then
+    PRIVATE_ADDR=$(echo ${LAUNCHED_INSTANCE} | jq '.PrivateIpAddress' | tr -d '"' | sed -e 's/null//g')
+cat > config/${MASTERKUBE}-dns.json <<EOF
+{
+	"Comment": "${MASTERKUBE} private DNS entry",
+	"Changes": [
+		{
+			"Action": "UPSERT",
+			"ResourceRecordSet": {
+				"Name": "${FQHOSTNAME}",
+				"Type": "A",
+				"TTL": 300,
+				"ResourceRecords": [
+                    {
+                        "Value": "$PRIVATE_ADDR"
+                    }
+				]
+			}
+		}
+	]
+}
+EOF
+    aws route53 change-resource-record-sets --profile ${AWS_PROFILE} --region ${AWS_REGION} --hosted-zone-id ${ROUTE53_ZONEID} \
+        --change-batch file://config/${MASTERKUBE}-dns.json
+fi
+
 echo -n "Wait for ${MASTERKUBE} ssh ready on ${IP_TYPE} IP=${IPADDR}"
 
 while :
 do
-    ssh ${SSH_OPTIONS} -o ConnectTimeout=1 "${SEED_USER}@${IPADDR}" sudo hostnamectl set-hostname "${MASTERKUBE}" 2>/dev/null && break
+    ssh ${SSH_OPTIONS} -o ConnectTimeout=1 "${SEED_USER}@${IPADDR}" sudo hostnamectl set-hostname "${FQHOSTNAME}" 2>/dev/null && break
     echo -n "."
     sleep 1
 done
@@ -468,7 +522,14 @@ scp ${SSH_OPTIONS} -r ../masterkube ${SEED_USER}@${IPADDR}:~
 
 echo "Start kubernetes ${MASTERKUBE} instance master node, kubernetes version=${KUBERNETES_VERSION}, providerID=${PROVIDERID}"
 ssh ${SSH_OPTIONS} ${SEED_USER}@${IPADDR} sudo cp /home/${SEED_USER}/masterkube/bin/* /usr/local/bin
-ssh ${SSH_OPTIONS} ${SEED_USER}@${IPADDR} sudo create-cluster.sh --max-pods ${MAX_PODS} --cloud-provider=${CLOUD_PROVIDER} --cni-plugin "${CNI_PLUGIN}" --kubernetes-version "${KUBERNETES_VERSION}" --node-group "${NODEGROUP_NAME}" ${CERT_EXTRA_SANS}
+ssh ${SSH_OPTIONS} ${SEED_USER}@${IPADDR} sudo create-cluster.sh \
+    --max-pods=${MAX_PODS} \
+    --private-zone-id="${ROUTE53_ZONEID}" \
+    --private-zone-name="${PRIVATE_DOMAIN_NAME}" \
+    --cloud-provider=${CLOUD_PROVIDER} \
+    --cni-plugin="${CNI_PLUGIN}" \
+    --kubernetes-version="${KUBERNETES_VERSION}" \
+    --node-group="${NODEGROUP_NAME}" ${CERT_EXTRA_SANS}
 
 scp ${SSH_OPTIONS} ${SEED_USER}@${IPADDR}:/etc/cluster/* ./cluster
 
@@ -598,6 +659,8 @@ AUTOSCALER_CONFIG=$(cat <<EOF
                 }
             ],
             "network": {
+                "route53": "$ROUTE53_ZONEID",
+                "privateZoneName": "$PRIVATE_DOMAIN_NAME",
                 "eni": [
                     {
                         "subnet": "${VPC_WORKER_SUBNET_ID}",
