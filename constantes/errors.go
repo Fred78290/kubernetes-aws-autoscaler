@@ -118,6 +118,9 @@ const (
 	// ErrStartVMFailed error msg
 	ErrStartVMFailed = "Could not start VM: %s, reason: %v"
 
+	// ErrRegisterDNSVMFailed error msg
+	ErrRegisterDNSVMFailed = "Could not register route53 record VM: %s, reason: %v"
+
 	// ErrDeleteVMFailed error msg
 	ErrDeleteVMFailed = "Could not delete VM: %s, reason: %v"
 
