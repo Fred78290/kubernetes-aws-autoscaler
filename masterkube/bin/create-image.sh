@@ -296,7 +296,7 @@ fi
 
 echo 'KUBELET_EXTRA_ARGS="--network-plugin=cni"' > /etc/default/kubelet
 
-#echo 'KUBELET_EXTRA_ARGS="--network-plugin=cni --fail-swap-on=false --read-only-port=10255 --feature-gates=VolumeSubpathEnvExpansion=true"' > /etc/default/kubelet
+#echo 'KUBELET_EXTRA_ARGS="--network-plugin=cni --fail-swap-on=false --read-only-port=10255"' > /etc/default/kubelet
 
 echo 'export PATH=/opt/cni/bin:$PATH' >> /etc/profile.d/apps-bin-path.sh
 
