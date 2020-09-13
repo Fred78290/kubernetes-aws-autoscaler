@@ -684,6 +684,7 @@ ssh ${SSH_OPTIONS} ${SEED_USER}@${IPADDR} sudo cp "/tmp/${SSH_KEY_FNAME}" /tmp/g
 # Create Pods
 create-ingress-controller.sh
 create-dashboard.sh
+create-metrics.sh
 create-helloworld.sh
 
 if [ "${LAUNCH_CA}" != "NO" ]; then
