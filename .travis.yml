@@ -1,43 +1,51 @@
+# Use the newer Travis-CI build templates based on the
+# Debian Linux distribution "Xenial" release.
 os: linux
-dist: xenial
+dist: bionic
 language: minimal
+env:
+  global:
+    - DOCKER_CLI_EXPERIMENTAL=enabled
 addons:
   sonarcloud:
     organization: fred78290-github
     token:
-      secure: EkVnBHiVTlaKFX97f3k5pX5WByO17gNjJPM75/VlGsZ8mwr6qtSeNV+LH+MQW4QMD1JsIkOaGMwnDxHkepxojZ77QhmJgzPYY9KZnjwu7niDVY2V3xpEDDVijM/MYhvL15OIsxn94eIxqqVGKcWpRDC0pFoPhGX8z/7LuZaWYav+LBqVWCnmqqvnDChXAPVbDRJUKXtAZE0gIOJ7MdTpB8atTSfVbe++f9eXSmuAQjy9vyC6ZFmvl9Irap54XGd5/55URO+dzhW5BRDpXyTw6P51HQtNoYdlXjBnlv9W8fNQ9B+p97WKQgdPJblFrQa0PfDe/oM8CMAt0KkHIjx+djX2IJ7XDa/aivhHeESkc2/iTCr3K93QIBDjCHLGP5ExLyTl35eG+jX2MFSNU24aaoL2k5Ez5z4o8WIoNGxXUWvOI0aVFmhO/A9/DxY2tUwfDrteD3JYJi+Xi54vNI9Ajb0mQonGiY0X+qP/XsCqufCU33wQzeRn3z/2p4E56tOCkk6sBPh63ltasFSTlyc1B5zdmDPTGiqUuFS7blkTrZ1iPqPYBD+OE9VpWcrTBeF/Hmn/WX9v0eNQih/5FQxBHkhuQZ2g9GE/TBazAY7CvaDGhlAknXQjOVEOmZacGl7T/MgUT0uiBiVKjLCfstb0/JmUTrPPd+DMKjqZX7TZI9A=
+      secure: "X6QTVwIX6ZGN3CSozfvTevW6XxvVFBXuZZxTSIsloldJ4uwxGZiKUyfO83PSov7I7FghKTaMppPxMgO6ZT5FlBqFNGJZ53QfrajGJ8//tS+fYZ94SucEYMZ4W7B4K+YjEMJERgBSw2mgrMIy6mZ+P4j0mhuHbAtvloFA7tJIjXYMTuoPqfHzeYkuBPGcWJ0r2n0zQTMNGVnjnsbZlj50BPoMx9H7S6dvtp1L67yyom4NnrDKwNNnq/dy5O0lhlIR3KzBXlf8E+pzC+CCDIXiasENhtJawez4yQ63gPtbJSR+9FbUmdoEX3Lr83HnhGrXnWJ5BsxYdjrQSV7E3B9EMJpP2C5pIjKC9HVgNyoeHgLT8nxcKtsQpmSyS/+lbus8/Vj+lTlir7vmcPDlehUHOeIemJajB23kmNiwWfo71MvfSnVt+4MqAYgegUW5G6fJAqEahVA2hgo/o58RXnD6m61EyPOlC273CpLJ8qrFqa6+cHspGkWa9KQ5RNfDIkj8i2iHR+HXkaeNy4L1KM2+6KIx7sJl1R1fo6RYwYM3S0HfL6Qm+HGqYesOhH9tTs2X27whzqBb+GzgwFuxYrBR6X+rAD/SXjF7ubqroJNmN+o4uGeVVevMCkFZc5vI2Q3XW8TU28orhHXm+aGHaq9GJ7I83om+69dcSi9uiNixFNA="
 cache:
   directories:
-  - "$HOME/.sonar/cache"
-  - vendor
+    - $HOME/.sonar/cache
+    - vendor
 jobs:
   include:
-  - stage: build
-    services: docker
-    install: true
-    script:
-    - make -e REGISTRY=fred78290 -e TAG=dev container
-    - sonar-scanner
-  - stage: test
-    services: docker
-    install: true
-    script: make test-in-docker
-  - stage: deploy
-    if: tag IS present OR commit_message =~ /\/ci-deploy/
-    services: docker
-    install: true
-    script: make -e REGISTRY=fred78290 -e TAG=$TRAVIS_TAG container
-    before_deploy:
-    - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-    after_deploy:
-    - docker push fred78290/aws-autoscaler:$TRAVIS_TAG
-    deploy:
-      provider: releases
-      api_key: "$GITHUB_OAUTH_TOKEN"
-      skip_cleanup: true
-      on:
-        tags: true
-        repo: Fred78290/kubernetes-aws-autoscaler
-      file:
-      - out/aws-autoscaler-darwin-amd64
-      - out/aws-autoscaler-linux-amd64
+    - stage: build
+      services: docker
+      install: true
+      script:
+        - make -e REGISTRY=fred78290 -e TAG=dev container
+        - sonar-scanner
+    - stage: test
+      services: docker
+      install: true
+      script: make test-in-docker
+    - stage: deploy
+      if: tag IS present OR commit_message =~ /\/ci-deploy/
+      services: docker
+      install: true
+      script: make -e REGISTRY=fred78290 -e TAG=$TRAVIS_TAG container
+      before_deploy:
+        - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+      after_deploy:
+        - docker push fred78290/aws-autoscaler-amd64:$TRAVIS_TAG
+        - docker push fred78290/aws-autoscaler-arm64:$TRAVIS_TAG
+        - docker manifest create fred78290/aws-autoscaler:$TRAVIS_TAG --amend fred78290/aws-autoscaler-amd64:$TRAVIS_TAG --amend fred78290/aws-autoscaler-arm64:$TRAVIS_TAG
+        - docker manifest push fred78290/aws-autoscaler:$TRAVIS_TAG
+      deploy:
+        provider: releases
+        api_key: $GITHUB_OAUTH_TOKEN
+        skip_cleanup: true
+        on:
+          tags: true
+          repo: Fred78290/kubernetes-aws-autoscaler
+        file:
+          - out/aws-autoscaler-amd64
+          - out/aws-autoscaler-arm64

@@ -1,12 +1,12 @@
 {
-    "apiVersion": "v1",
-    "kind": "Secret",
-    "metadata": {
-        "labels": {
-            "k8s-app": "kubernetes-dashboard"
-        },
-        "name": "kubernetes-dashboard-key-holder",
-        "namespace": "$K8NAMESPACE"
+  "apiVersion": "v1",
+  "kind": "Secret",
+  "metadata": {
+    "labels": {
+      "k8s-app": "kubernetes-dashboard"
     },
-    "type": "Opaque"
+    "name": "kubernetes-dashboard-key-holder",
+    "namespace": "kubernetes-dashboard"
+  },
+  "type": "Opaque"
 }

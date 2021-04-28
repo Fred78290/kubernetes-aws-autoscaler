@@ -38,6 +38,17 @@
                 ""
             ],
             "resources": [
+                "nodes/status"
+            ],
+            "verbs": [
+                "update"
+            ]
+        },
+        {
+            "apiGroups": [
+                ""
+            ],
+            "resources": [
                 "pods/status"
             ],
             "verbs": [
@@ -52,11 +63,13 @@
                 "endpoints"
             ],
             "resourceNames": [
-                "cluster-autoscaler"
+                "cluster-autoscaler",
+                "aws-autoscaler"
             ],
             "verbs": [
                 "get",
-                "update"
+                "update",
+                "delete"
             ]
         },
         {
@@ -70,20 +83,8 @@
                 "watch",
                 "list",
                 "get",
-                "update"
-            ]
-        },
-        {
-            "apiGroups": [
-                "batch"
-            ],
-            "resources": [
-                "jobs"
-            ],
-            "verbs": [
-                "watch",
-                "list",
-                "get"
+                "update",
+                "delete"
             ]
         },
         {
@@ -100,7 +101,8 @@
             "verbs": [
                 "watch",
                 "list",
-                "get"
+                "get",
+                "update"
             ]
         },
         {
@@ -134,9 +136,38 @@
                 "apps"
             ],
             "resources": [
+                "statefulsets",
                 "replicasets",
-                "daemonsets",
-                "statefulsets"
+                "daemonsets"
+            ],
+            "verbs": [
+                "watch",
+                "list",
+                "get",
+                "delete"
+            ]
+        },
+        {
+            "apiGroups": [
+                "storage.k8s.io"
+            ],
+            "resources": [
+                "storageclasses",
+                "csinodes"
+            ],
+            "verbs": [
+                "get",
+                "list",
+                "watch"
+            ]
+        },
+        {
+            "apiGroups": [
+                "batch"
+            ],
+            "resources": [
+                "jobs",
+                "cronjobs"
             ],
             "verbs": [
                 "watch",
@@ -146,15 +177,43 @@
         },
         {
             "apiGroups": [
+                "coordination.k8s.io"
+            ],
+            "resources": [
+                "leases"
+            ],
+            "verbs": [
+                "create"
+            ]
+        },
+        {
+            "apiGroups": [
+                "coordination.k8s.io"
+            ],
+            "resourceNames": [
+                "cluster-autoscaler"
+            ],
+            "resources": [
+                "leases"
+            ],
+            "verbs": [
+                "get",
+                "update"
+            ]
+        },
+        {
+            "apiGroups": [
                 "storage.k8s.io"
             ],
             "resources": [
-                "storageclasses"
+                "csistoragecapacities",
+                "csidrivers"
             ],
             "verbs": [
-                "watch",
                 "list",
-                "get"
+                "get",
+                "update",
+                "watch"
             ]
         }
     ]

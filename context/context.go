@@ -1,21 +1,19 @@
-package aws
+package context
 
 import (
 	"context"
 	"time"
-
-	"github.com/aws/aws-sdk-go/aws"
 )
 
 // Context wrapper
 type Context struct {
-	ctx    aws.Context
+	ctx    context.Context
 	cancel context.CancelFunc
 }
 
 // NewContext return a context. Timeout is in seconds
-func NewContext(timeout float64) *Context {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout*1000)*time.Millisecond)
+func NewContext(timeout time.Duration) *Context {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout*time.Second)
 	return &Context{
 		ctx:    ctx,
 		cancel: cancel,

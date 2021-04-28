@@ -1,5 +1,7 @@
 #!/bin/bash
+sudo rm -rf out
 
-make -e REGISTRY=fred78290 -e TAG=dev container
+VERSION=v1.21.0-dev
+REGISTRY=fred78290
 
-docker push fred78290/aws-autoscaler:dev
+make -e REGISTRY=$REGISTRY -e TAG=$VERSION container-push-manifest

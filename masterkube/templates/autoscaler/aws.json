@@ -30,7 +30,7 @@
                 },
                 "containers": [
                     {
-                        "image": "fred78290/aws-autoscaler:v1.18.6",
+                        "image": "$REGISTRY/aws-autoscaler:v1.21.0",
                         "name": "aws-autoscaler",
                         "resources": {
                             "limits": {
@@ -43,20 +43,13 @@
                             }
                         },
                         "command": [
-                            "./aws-autoscaler",
-                            "--kubeconfig=/etc/kubernetes/config",
+                            "/usr/local/bin/aws-autoscaler",
                             "--config=/etc/cluster/kubernetes-aws-autoscaler.json",
                             "--save=/etc/cluster/aws-autoscaler-state.json",
-                            "-v=1",
-                            "-logtostderr=true"
+                            "--log-level=info"
                         ],
                         "imagePullPolicy": "Always",
                         "volumeMounts": [
-                            {
-                                "name": "kubernetes",
-                                "mountPath": "/etc/kubernetes/config",
-                                "readOnly": true
-                            },
                             {
                                 "name": "aws-autoscaler",
                                 "mountPath": "/etc/cluster"
@@ -69,12 +62,6 @@
                         "name": "aws-autoscaler",
                         "hostPath": {
                             "path": "/etc/cluster"
-                        }
-                    },
-                    {
-                        "name": "kubernetes",
-                        "hostPath": {
-                            "path": "/etc/kubernetes/admin.conf"
                         }
                     }
                 ]

@@ -5,9 +5,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/golang/glog"
+	glog "github.com/sirupsen/logrus"
 
 	"github.com/Fred78290/kubernetes-aws-autoscaler/constantes"
+	"github.com/Fred78290/kubernetes-aws-autoscaler/context"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -43,7 +44,7 @@ func GetEc2Instance(config *Configuration, instanceName string) (*Ec2Instance, e
 			},
 		}
 
-		ctx := NewContext(config.Timeout)
+		ctx := context.NewContext(config.Timeout)
 		defer ctx.Cancel()
 
 		if result, err = client.DescribeInstancesWithContext(ctx, input); err != nil {
@@ -116,7 +117,7 @@ func createClient(conf *Configuration) (*ec2.EC2, error) {
 	var client *ec2.EC2
 
 	// Create EC2 service client
-	if glog.V(6) {
+	if glog.GetLevel() >= glog.DebugLevel {
 		client = ec2.New(sess, aws.NewConfig().WithLogger(conf).WithLogLevel(aws.LogDebugWithHTTPBody).WithLogLevel(aws.LogDebugWithSigning))
 	} else {
 		client = ec2.New(sess)
@@ -158,8 +159,8 @@ func (instance *Ec2Instance) getEc2Instance() (*ec2.Instance, error) {
 }
 
 // NewContext create instance context
-func (instance *Ec2Instance) NewContext() *Context {
-	return NewContext(instance.config.Timeout)
+func (instance *Ec2Instance) NewContext() *context.Context {
+	return context.NewContext(instance.config.Timeout)
 }
 
 // WaitForIP wait ip a VM by name
@@ -168,9 +169,9 @@ func (instance *Ec2Instance) WaitForIP(callback CallbackCheckIPReady) (*string, 
 	var ec2Instance *ec2.Instance
 	var code int64
 
-	glog.V(4).Infof("WaitForIP: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
+	glog.Debugf("WaitForIP: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
 
-	timeout := time.Duration(instance.config.Timeout*1000) * time.Millisecond
+	timeout := instance.config.Timeout * time.Second
 
 	for now := time.Now(); time.Since(now) < timeout; time.Sleep(time.Second) {
 
@@ -191,7 +192,7 @@ func (instance *Ec2Instance) WaitForIP(callback CallbackCheckIPReady) (*string, 
 
 			instance.AddressIP = address
 
-			glog.V(4).Infof("WaitForIP: instance %s id (%s), using IP:%s", instance.InstanceName, instance.getInstanceID(), *address)
+			glog.Debugf("WaitForIP: instance %s id (%s), using IP:%s", instance.InstanceName, instance.getInstanceID(), *address)
 
 			for time.Since(now) < timeout {
 				if err = callback.CheckIfIPIsReady(instance.InstanceName, *address); err == nil {
@@ -201,25 +202,25 @@ func (instance *Ec2Instance) WaitForIP(callback CallbackCheckIPReady) (*string, 
 				time.Sleep(time.Second)
 			}
 
-			return address, fmt.Errorf(constantes.ErrWaitIPTimeout, instance.InstanceName, instance.config.Timeout)
+			return address, fmt.Errorf(constantes.ErrWaitIPTimeout, instance.InstanceName, instance.config.Timeout.String())
 		} else if code != 0 {
 			return nil, fmt.Errorf(constantes.ErrWrongStateMachine, *ec2Instance.State.Name, instance.InstanceName)
 		}
 	}
 
-	return nil, fmt.Errorf(constantes.ErrWaitIPTimeout, instance.InstanceName, instance.config.Timeout)
+	return nil, fmt.Errorf(constantes.ErrWaitIPTimeout, instance.InstanceName, instance.config.Timeout.String())
 }
 
 // WaitForPowered wait ip a VM by name
 func (instance *Ec2Instance) WaitForPowered() error {
 
-	glog.V(4).Infof("WaitForPowered: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
+	glog.Debugf("WaitForPowered: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
 
-	timeout := time.Duration(instance.config.Timeout*1000) * time.Millisecond
+	timeout := instance.config.Timeout * time.Second
 
 	for now := time.Now(); time.Since(now) < timeout; time.Sleep(time.Second) {
 		if ec2Instance, err := instance.getEc2Instance(); err != nil {
-			glog.V(4).Infof("WaitForPowered: instance %s id (%s), got an error %v", instance.InstanceName, instance.getInstanceID(), err)
+			glog.Debugf("WaitForPowered: instance %s id (%s), got an error %v", instance.InstanceName, instance.getInstanceID(), err)
 
 			return err
 		} else {
@@ -227,32 +228,32 @@ func (instance *Ec2Instance) WaitForPowered() error {
 			var code int64 = *ec2Instance.State.Code
 
 			if code == 16 {
-				glog.V(4).Infof("WaitForPowered: ready instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
+				glog.Debugf("WaitForPowered: ready instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
 				return nil
 			}
 
 			if code != 0 {
-				glog.V(4).Infof("WaitForPowered: instance %s id (%s), unexpected state: %d", instance.InstanceName, instance.getInstanceID(), code)
+				glog.Debugf("WaitForPowered: instance %s id (%s), unexpected state: %d", instance.InstanceName, instance.getInstanceID(), code)
 
 				return fmt.Errorf(constantes.ErrWrongStateMachine, *ec2Instance.State.Name, instance.InstanceName)
 			}
 		}
 	}
 
-	return fmt.Errorf(constantes.ErrWaitIPTimeout, instance.InstanceName, instance.config.Timeout)
+	return fmt.Errorf(constantes.ErrWaitIPTimeout, instance.InstanceName, instance.config.Timeout.String())
 }
 
 // Create will create a named VM not powered
 // memory and disk are in megabytes
-func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType, userData string, disk int) error {
+func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType string, userData *string, disk int) error {
 	var err error
 	var result *ec2.Reservation
 
-	glog.V(4).Infof("Create: instance name %s in node group %s", instance.InstanceName, nodeGroup)
+	glog.Debugf("Create: instance name %s in node group %s", instance.InstanceName, nodeGroup)
 
 	// Check if instance is not already created
 	if _, err = GetEc2Instance(instance.config, instance.InstanceName); err == nil {
-		glog.V(4).Infof("Create: instance name %s already exists", instance.InstanceName)
+		glog.Debugf("Create: instance name %s already exists", instance.InstanceName)
 
 		return fmt.Errorf(constantes.ErrCantCreateVMAlreadyExist, instance.InstanceName)
 	}
@@ -267,7 +268,7 @@ func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType, user
 		InstanceInitiatedShutdownBehavior: aws.String(ec2.ShutdownBehaviorStop),
 		MaxCount:                          aws.Int64(1),
 		MinCount:                          aws.Int64(1),
-		UserData:                          aws.String(userData),
+		UserData:                          userData,
 		IamInstanceProfile: &ec2.IamInstanceProfileSpecification{
 			Arn: &instance.config.IamRole,
 		},
@@ -330,7 +331,7 @@ func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType, user
 		}
 
 	} else {
-		return fmt.Errorf("Unable create worker node, any network interface defined")
+		return fmt.Errorf("unable create worker node, any network interface defined")
 	}
 
 	if disk > 0 {
@@ -361,7 +362,7 @@ func (instance *Ec2Instance) Delete() error {
 	ctx := instance.NewContext()
 	defer ctx.Cancel()
 
-	glog.V(4).Infof("Delete: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
+	glog.Debugf("Delete: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
 
 	input := &ec2.TerminateInstancesInput{
 		InstanceIds: []*string{
@@ -381,7 +382,7 @@ func (instance *Ec2Instance) PowerOn() error {
 	ctx := instance.NewContext()
 	defer ctx.Cancel()
 
-	glog.V(4).Infof("PowerOn: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
+	glog.Debugf("PowerOn: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
 
 	input := &ec2.StartInstancesInput{
 		InstanceIds: []*string{
@@ -400,7 +401,7 @@ func (instance *Ec2Instance) powerOff(force bool) error {
 	ctx := instance.NewContext()
 	defer ctx.Cancel()
 
-	glog.V(4).Infof("powerOff: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
+	glog.Debugf("powerOff: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
 
 	input := &ec2.StopInstancesInput{
 		Force: &force,
@@ -410,7 +411,7 @@ func (instance *Ec2Instance) powerOff(force bool) error {
 	}
 
 	if _, err := instance.client.StopInstancesWithContext(ctx, input); err != nil {
-		glog.V(4).Infof("powerOff: instance %s id (%s), got error %v", instance.InstanceName, instance.getInstanceID(), err)
+		glog.Debugf("powerOff: instance %s id (%s), got error %v", instance.InstanceName, instance.getInstanceID(), err)
 		return err
 	}
 
@@ -430,7 +431,7 @@ func (instance *Ec2Instance) ShutdownGuest() error {
 // Status return the current status of VM by name
 func (instance *Ec2Instance) Status() (*Status, error) {
 
-	glog.V(4).Infof("Status: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
+	glog.Debugf("Status: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
 
 	if ec2Instance, err := instance.getEc2Instance(); err != nil {
 		return nil, err
@@ -441,7 +442,7 @@ func (instance *Ec2Instance) Status() (*Status, error) {
 		code := ec2Instance.State.Code
 
 		if code == nil || *code == 48 {
-			glog.V(4).Infof("Status: instance %s id (%s) is terminated", instance.InstanceName, instance.getInstanceID())
+			glog.Debugf("Status: instance %s id (%s) is terminated", instance.InstanceName, instance.getInstanceID())
 
 			return nil, fmt.Errorf("EC2 Instance %s is terminated", instance.InstanceName)
 		} else if *code == 16 || *code == 0 {
@@ -462,60 +463,66 @@ func (instance *Ec2Instance) Status() (*Status, error) {
 }
 
 func (instance *Ec2Instance) changeResourceRecordSetsInput(cmd, zoneID, name, address string, wait bool) error {
-	svc := route53.New(session.New())
+	var svc *route53.Route53
 
-	input := &route53.ChangeResourceRecordSetsInput{
-		ChangeBatch: &route53.ChangeBatch{
-			Changes: []*route53.Change{
-				{
-					Action: aws.String(cmd),
-					ResourceRecordSet: &route53.ResourceRecordSet{
-						Name: aws.String(name),
-						ResourceRecords: []*route53.ResourceRecord{
-							{
-								Value: aws.String(address),
+	if session, e := session.NewSession(); e != nil {
+		return e
+	} else {
+		svc = route53.New(session)
+
+		input := &route53.ChangeResourceRecordSetsInput{
+			ChangeBatch: &route53.ChangeBatch{
+				Changes: []*route53.Change{
+					{
+						Action: aws.String(cmd),
+						ResourceRecordSet: &route53.ResourceRecordSet{
+							Name: aws.String(name),
+							ResourceRecords: []*route53.ResourceRecord{
+								{
+									Value: aws.String(address),
+								},
 							},
+							TTL:  aws.Int64(600),
+							Type: aws.String("A"),
 						},
-						TTL:  aws.Int64(600),
-						Type: aws.String("A"),
 					},
 				},
+				Comment: aws.String("Kubernetes worker node"),
 			},
-			Comment: aws.String("Kubernetes worker node"),
-		},
-		HostedZoneId: aws.String(zoneID),
-	}
+			HostedZoneId: aws.String(zoneID),
+		}
 
-	result, err := svc.ChangeResourceRecordSets(input)
-	if err != nil {
-		if aerr, ok := err.(awserr.Error); ok {
-			switch aerr.Code() {
-			case route53.ErrCodeNoSuchHostedZone:
-				return fmt.Errorf("%s, %v", route53.ErrCodeNoSuchHostedZone, aerr.Error())
-			case route53.ErrCodeNoSuchHealthCheck:
-				return fmt.Errorf("%s, %v", route53.ErrCodeNoSuchHealthCheck, aerr.Error())
-			case route53.ErrCodeInvalidChangeBatch:
-				return fmt.Errorf("%s, %v", route53.ErrCodeInvalidChangeBatch, aerr.Error())
-			case route53.ErrCodeInvalidInput:
-				return fmt.Errorf("%s, %v", route53.ErrCodeInvalidInput, aerr.Error())
-			case route53.ErrCodePriorRequestNotComplete:
-				return fmt.Errorf("%s, %v", route53.ErrCodePriorRequestNotComplete, aerr.Error())
-			default:
-				return aerr
+		result, err := svc.ChangeResourceRecordSets(input)
+		if err != nil {
+			if aerr, ok := err.(awserr.Error); ok {
+				switch aerr.Code() {
+				case route53.ErrCodeNoSuchHostedZone:
+					return fmt.Errorf("%s, %v", route53.ErrCodeNoSuchHostedZone, aerr.Error())
+				case route53.ErrCodeNoSuchHealthCheck:
+					return fmt.Errorf("%s, %v", route53.ErrCodeNoSuchHealthCheck, aerr.Error())
+				case route53.ErrCodeInvalidChangeBatch:
+					return fmt.Errorf("%s, %v", route53.ErrCodeInvalidChangeBatch, aerr.Error())
+				case route53.ErrCodeInvalidInput:
+					return fmt.Errorf("%s, %v", route53.ErrCodeInvalidInput, aerr.Error())
+				case route53.ErrCodePriorRequestNotComplete:
+					return fmt.Errorf("%s, %v", route53.ErrCodePriorRequestNotComplete, aerr.Error())
+				default:
+					return aerr
+				}
+			} else {
+				return err
 			}
-		} else {
-			return err
 		}
-	}
 
-	if wait {
-		input := &route53.GetChangeInput{
-			Id: result.ChangeInfo.Id,
+		if wait {
+			input := &route53.GetChangeInput{
+				Id: result.ChangeInfo.Id,
+			}
+			return svc.WaitUntilResourceRecordSetsChanged(input)
 		}
-		return svc.WaitUntilResourceRecordSetsChanged(input)
-	}
 
-	return nil
+		return nil
+	}
 }
 
 // RegisterDNS register EC2 instance in Route53

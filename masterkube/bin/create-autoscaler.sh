@@ -3,8 +3,6 @@ LAUNCH_CA=$1
 
 CURDIR=$(dirname $0)
 
-[ $(uname -s) == "Darwin" ] && GOOS=darwin || GOOS=linux
-
 pushd $CURDIR/../
 
 MASTER_IP=$(cat ./cluster/manager-ip)
@@ -26,7 +24,8 @@ EOF") | jq . > $ETC_DIR/$1.json
 kubectl apply -f $ETC_DIR/$1.json --kubeconfig=./cluster/config
 }
 
-deploy service-account
+deploy service-account-autoscaler
+deploy service-account-aws
 deploy cluster-role
 deploy role
 deploy cluster-role-binding
@@ -37,12 +36,11 @@ if [ "$LAUNCH_CA" == YES ]; then
 elif [ "$LAUNCH_CA" == "DEBUG" ]; then
     deploy autoscaler
 elif [ "$LAUNCH_CA" == "LOCAL" ]; then
-    nohup ../out/aws-autoscaler-$GOOS-amd64 \
+    nohup ../out/aws-autoscaler-$(go env GOARCH) \
         --kubeconfig=$KUBECONFIG \
         --config=$PWD/config/kubernetes-aws-autoscaler.json \
         --save=$PWD/config/aws-autoscaler-state.json \
-        -v=1 \
-        -logtostderr=true  1>>config/aws-autoscaler.log 2>&1 &
+        --log-level=info 1>>config/aws-autoscaler.log 2>&1 &
     pid="$!"
 
     echo -n "$pid" > config/aws-autoscaler.pid

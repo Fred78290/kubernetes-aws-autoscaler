@@ -4,7 +4,7 @@ set -e
 
 KUBERNETES_VERSION=$(curl -sSL https://dl.k8s.io/release/stable.txt)
 CNI_VERSION=v0.6.0
-CNI_PLUGIN_VERSION=v0.8.6
+CNI_PLUGIN_VERSION=v0.9.1
 CNI_PLUGIN=aws
 SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
 CACHE=~/.local/aws/cache
@@ -319,7 +319,7 @@ fi
 
 if [ "$CNI_PLUGIN" = "aws" ]; then
     docker login -u AWS -p "$ECR_PASSWORD" "602401143452.dkr.ecr.us-west-2.amazonaws.com"
-    pull_image https://raw.githubusercontent.com/aws/amazon-vpc-cni-k8s/release-1.6.2/config/v1.6/aws-k8s-cni.yaml
+    pull_image https://raw.githubusercontent.com/aws/amazon-vpc-cni-k8s/v1.7.10/config/v1.7/aws-k8s-cni.yaml
 elif [ "$CNI_PLUGIN" = "calico" ]; then
     pull_image https://docs.projectcalico.org/manifests/calico-vxlan.yaml
 elif [ "$CNI_PLUGIN" = "flannel" ]; then
@@ -357,7 +357,7 @@ LAUNCHED_INSTANCE=$(aws ec2 run-instances \
     --region ${AWS_REGION} \
     --image-id ${SEED_IMAGE} \
     --count 1  \
-    --instance-type t2.micro \
+    --instance-type t3a.micro \
     --key-name ${SSH_KEYNAME} \
     --subnet-id ${VPC_MASTER_SUBNET_ID} \
     --security-group-ids ${VPC_MASTER_SECURITY_GROUPID} \

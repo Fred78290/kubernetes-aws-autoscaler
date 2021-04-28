@@ -4,7 +4,7 @@ set -e
 
 export CNI_PLUGIN=aws
 export CLOUD_PROVIDER=aws
-export KUBERNETES_VERSION=v1.18.6
+export KUBERNETES_VERSION=v1.21.0
 export CLUSTER_DIR=/etc/cluster
 export SCHEME="aws"
 export NODEGROUP_NAME="aws-ca-k8s"
@@ -147,7 +147,7 @@ case $CNI_PLUGIN in
 
         POD_NETWORK_CIDR="192.168.0.0/16"
 
-        curl -s -O -L "https://github.com/projectcalico/calicoctl/releases/download/v3.14.1/calicoctl-linux-amd64"
+        curl -s -O -L "https://github.com/projectcalico/calicoctl/releases/download/v3.18.2/calicoctl-linux-amd64"
         chmod +x calicoctl-linux-amd64
         mv calicoctl-linux-amd64 /usr/local/bin/calicoctl
         ;;
@@ -378,7 +378,7 @@ if [ "$CNI_PLUGIN" = "aws" ]; then
 
     echo "Install AWS network"
 
-    kubectl apply -f "https://raw.githubusercontent.com/aws/amazon-vpc-cni-k8s/release-1.6.2/config/v1.6/aws-k8s-cni.yaml" 2>&1
+    kubectl apply -f "https://raw.githubusercontent.com/aws/amazon-vpc-cni-k8s/v1.7.10/config/v1.7/aws-k8s-cni.yaml" 2>&1
 
 elif [ "$CNI_PLUGIN" = "calico" ]; then
 

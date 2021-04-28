@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/golang/glog"
+	glog "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/Fred78290/kubernetes-aws-autoscaler/aws"
@@ -16,7 +16,6 @@ import (
 
 type ConfigurationTest struct {
 	aws.Configuration
-	CloudInit    interface{}               `json:"cloud-init"`
 	SSH          types.AutoScalerServerSSH `json:"ssh"`
 	InstanceName string                    `json:"instanceName"`
 	InstanceType string                    `json:"instanceType"`
@@ -40,29 +39,6 @@ func testFeature(name string) bool {
 	return true
 }
 
-func saveToJson(fileName string, config *ConfigurationTest) error {
-	file, err := os.Create(fileName)
-
-	if err != nil {
-		glog.Errorf("Failed to open file:%s, error:%v", fileName, err)
-
-		return err
-	}
-
-	defer file.Close()
-
-	encoder := json.NewEncoder(file)
-	err = encoder.Encode(config)
-
-	if err != nil {
-		glog.Errorf("failed to encode config to file:%s, error:%v", fileName, err)
-
-		return err
-	}
-
-	return nil
-}
-
 func loadFromJson(fileName string) *ConfigurationTest {
 	if testConfig == nil {
 		file, err := os.Open(fileName)
@@ -83,7 +59,7 @@ func loadFromJson(fileName string) *ConfigurationTest {
 func (config *ConfigurationTest) CheckIfIPIsReady(nodename, address string) error {
 	command := fmt.Sprintf("hostnamectl set-hostname %s", nodename)
 
-	_, err := utils.Sudo(&config.SSH, address, 0.5, command)
+	_, err := utils.Sudo(&config.SSH, address, 1, command)
 
 	return err
 }
@@ -94,9 +70,7 @@ func Test_AuthMethodKey(t *testing.T) {
 
 		signer := utils.AuthMethodFromPrivateKeyFile(config.SSH.GetAuthKeys())
 
-		if assert.NotNil(t, signer) {
-
-		}
+		assert.NotNil(t, signer)
 	}
 }
 
@@ -134,7 +108,7 @@ func Test_createInstance(t *testing.T) {
 	if testFeature("Test_createInstance") {
 		config := loadFromJson(getConfFile())
 
-		_, err := config.Create(0, "test-aws-autoscaler", config.InstanceName, config.InstanceType, config.Disk, config.CloudInit)
+		_, err := config.Create(0, "test-aws-autoscaler", config.InstanceName, config.InstanceType, config.Disk, nil)
 
 		if assert.NoError(t, err, "Can't create VM") {
 			t.Logf("VM created")

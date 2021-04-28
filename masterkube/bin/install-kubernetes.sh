@@ -1,6 +1,6 @@
 #!/bin/bash
 KUBERNETES_VERSION=$1
-CNI_VERSION="v0.8.5"
+CNI_VERSION="v0.9.1"
 
 curl -s https://get.docker.com | bash
 

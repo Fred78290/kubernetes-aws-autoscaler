@@ -1,23 +1,15 @@
 package server
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"os"
 	"strconv"
 	"strings"
-	"time"
-
-	"gopkg.in/yaml.v2"
-	apiv1 "k8s.io/api/core/v1"
 
 	"github.com/Fred78290/kubernetes-aws-autoscaler/aws"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/constantes"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/types"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/utils"
-	"github.com/golang/glog"
+	glog "github.com/sirupsen/logrus"
 )
 
 // AutoScalerServerNodeState VM state
@@ -71,99 +63,10 @@ func (s AutoScalerServerNodeState) String() string {
 	return autoScalerServerNodeStateString[s]
 }
 
-func (vm *AutoScalerServerNode) prepareKubelet() (string, error) {
-	var out string
-	var err error
-	var fName = fmt.Sprintf("/tmp/set-kubelet-default-%s.sh", vm.InstanceName)
-	var address = vm.Addresses[0]
-	var maxPods = vm.serverConfig.MaxPods
-	var kubeletExtraArgs string
+func (vm *AutoScalerServerNode) waitReady(c types.ClientGenerator) error {
+	glog.Debugf("AutoScalerNode::waitReady, node:%s", vm.NodeName)
 
-	if maxPods == 0 {
-		maxPods = 110
-	}
-
-	if vm.serverConfig.CloudProvider == "aws" {
-		kubeletExtraArgs = fmt.Sprintf("echo \"KUBELET_EXTRA_ARGS=\\\"$KUBELET_EXTRA_ARGS --cloud-provider=aws --max-pods=%d --node-ip=%s --provider-id=%s\\\"\" > /etc/default/kubelet", maxPods, address, vm.ProviderID)
-	} else {
-		kubeletExtraArgs = fmt.Sprintf("echo \"KUBELET_EXTRA_ARGS=\\\"$KUBELET_EXTRA_ARGS --max-pods=%d --node-ip=%s --provider-id=%s\\\"\" > /etc/default/kubelet", maxPods, address, vm.ProviderID)
-	}
-
-	kubeletDefault := []string{
-		"#!/bin/bash",
-		". /etc/default/kubelet",
-		kubeletExtraArgs,
-		"systemctl restart kubelet",
-	}
-
-	if err = ioutil.WriteFile(fName, []byte(strings.Join(kubeletDefault, "\n")), 0755); err != nil {
-		return out, err
-	}
-
-	defer os.Remove(fName)
-
-	if err = utils.Scp(vm.serverConfig.SSH, address, fName, fName); err != nil {
-		glog.Errorf("Unable to scp node %s address:%s, reason:%s", address, vm.InstanceName, err)
-
-		return out, err
-	}
-
-	if out, err = utils.Sudo(vm.serverConfig.SSH, address, vm.AwsConfig.Timeout, fmt.Sprintf("bash %s", fName)); err != nil {
-		glog.Errorf("Unable to ssh node %s address:%s, reason:%s", address, vm.InstanceName, err)
-
-		return out, err
-	}
-
-	return "", nil
-}
-
-func (vm *AutoScalerServerNode) waitReady() error {
-	glog.V(5).Infof("AutoScalerNode::waitReady, node:%s", vm.InstanceName)
-
-	kubeconfig := vm.serverConfig.KubeConfig
-
-	// Max 60s
-	for index := 0; index < 12; index++ {
-		var out string
-		var err error
-		var arg = []string{
-			"kubectl",
-			"get",
-			"nodes",
-			vm.NodeName,
-			"--output",
-			"json",
-			"--kubeconfig",
-			kubeconfig,
-		}
-
-		if out, err = utils.Pipe(arg...); err != nil {
-			return err
-		}
-
-		var nodeInfo apiv1.Node
-
-		if err = json.Unmarshal([]byte(out), &nodeInfo); err != nil {
-			return fmt.Errorf(constantes.ErrUnmarshallingError, vm.InstanceName, err)
-		}
-
-		for _, status := range nodeInfo.Status.Conditions {
-			if status.Type == "Ready" {
-				if b, e := strconv.ParseBool(string(status.Status)); e == nil {
-					if b {
-						glog.Infof("The kubernetes node %s is Ready", vm.InstanceName)
-						return nil
-					}
-				}
-			}
-		}
-
-		glog.Infof("The kubernetes node:%s is not ready", vm.InstanceName)
-
-		time.Sleep(5 * time.Second)
-	}
-
-	return fmt.Errorf(constantes.ErrNodeIsNotReady, vm.InstanceName)
+	return c.WaitNodeToBeReady(vm.NodeName, 60)
 }
 
 func (vm *AutoScalerServerNode) kubeAdmJoin() error {
@@ -194,124 +97,36 @@ func (vm *AutoScalerServerNode) kubeAdmJoin() error {
 	return nil
 }
 
-func (vm *AutoScalerServerNode) setNodeLabels(nodeLabels, systemLabels KubernetesLabel) error {
+func (vm *AutoScalerServerNode) setNodeLabels(c types.ClientGenerator, nodeLabels, systemLabels KubernetesLabel) error {
 	if len(nodeLabels)+len(systemLabels) > 0 {
 
-		args := []string{
-			"kubectl",
-			"label",
-			"nodes",
-			vm.NodeName,
-			"node-role.kubernetes.io/worker=worker",
-		}
+		labels := map[string]string{}
 
 		// Append extras arguments
 		for k, v := range nodeLabels {
-			args = append(args, fmt.Sprintf("%s=%s", k, v))
+			labels[k] = v
 		}
 
 		for k, v := range systemLabels {
-			args = append(args, fmt.Sprintf("%s=%s", k, v))
+			labels[k] = v
 		}
 
-		args = append(args, "--kubeconfig")
-		args = append(args, vm.serverConfig.KubeConfig)
-
-		if out, err := utils.Pipe(args...); err != nil {
-			return fmt.Errorf(constantes.ErrKubeCtlReturnError, vm.InstanceName, out, err)
+		if err := c.LabelNode(vm.NodeName, labels); err != nil {
+			return fmt.Errorf(constantes.ErrLabelNodeReturnError, vm.NodeName, err)
 		}
 	}
 
-	args := []string{
-		"kubectl",
-		"annotate",
-		"node",
-		vm.NodeName,
-		fmt.Sprintf("%s=%s", constantes.NodeLabelGroupName, vm.NodeGroupID),
-		fmt.Sprintf("%s=%s", constantes.AnnotationInstanceName, vm.InstanceName),
-		fmt.Sprintf("%s=%s", constantes.AnnotationInstanceID, *vm.RunningInstance.InstanceID),
-		fmt.Sprintf("%s=%s", constantes.AnnotationNodeAutoProvisionned, strconv.FormatBool(vm.AutoProvisionned)),
-		fmt.Sprintf("%s=%d", constantes.AnnotationNodeIndex, vm.NodeIndex),
-		"--overwrite",
-		"--kubeconfig",
-		vm.serverConfig.KubeConfig,
+	annotations := map[string]string{
+		constantes.NodeLabelGroupName:             vm.NodeGroupID,
+		constantes.AnnotationNodeAutoProvisionned: strconv.FormatBool(vm.AutoProvisionned),
+		constantes.AnnotationNodeIndex:            strconv.Itoa(vm.NodeIndex),
 	}
 
-	if out, err := utils.Pipe(args...); err != nil {
-		return fmt.Errorf(constantes.ErrKubeCtlReturnError, vm.InstanceName, out, err)
+	if err := c.AnnoteNode(vm.NodeName, annotations); err != nil {
+		return fmt.Errorf(constantes.ErrAnnoteNodeReturnError, vm.NodeName, err)
 	}
 
 	return nil
-}
-
-var phDefaultRsyncFlags = []string{
-	"--verbose",
-	"--archive",
-	"-z",
-	"--copy-links",
-	"--no-owner",
-	"--no-group",
-	"--delete",
-}
-
-func encodeCloudInit(object interface{}) string {
-	var out bytes.Buffer
-
-	fmt.Fprintln(&out, "#cloud-init")
-
-	b, _ := yaml.Marshal(object)
-
-	fmt.Fprintln(&out, string(b))
-
-	return out.String()
-}
-
-func (vm *AutoScalerServerNode) syncFolders() (string, error) {
-
-	syncFolders := vm.serverConfig.SyncFolders
-
-	if syncFolders != nil && len(syncFolders.Folders) > 0 {
-		for _, folder := range syncFolders.Folders {
-			var rsync = []string{
-				"rsync",
-			}
-
-			tempFile, _ := ioutil.TempFile(os.TempDir(), "aws-rsync")
-
-			defer tempFile.Close()
-
-			if len(syncFolders.RsyncOptions) == 0 {
-				rsync = append(rsync, phDefaultRsyncFlags...)
-			} else {
-				rsync = append(rsync, syncFolders.RsyncOptions...)
-			}
-
-			sshOptions := []string{
-				"--rsync-path",
-				"sudo rsync",
-				"-e",
-				fmt.Sprintf("ssh -p 22 -o LogLevel=FATAL -o ControlMaster=auto -o ControlPath=%s -o ControlPersist=10m  -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i '%s'", tempFile.Name(), syncFolders.RsyncSSHKey),
-			}
-
-			excludes := make([]string, 0, len(folder.Excludes)*2)
-
-			for _, exclude := range folder.Excludes {
-				excludes = append(excludes, "--exclude", exclude)
-			}
-
-			rsync = append(rsync, sshOptions...)
-			rsync = append(rsync, excludes...)
-			rsync = append(rsync, folder.Source, fmt.Sprintf("%s@%s:%s", syncFolders.RsyncUser, vm.Addresses[0], folder.Destination))
-
-			if out, err := utils.Pipe(rsync...); err != nil {
-				return out, err
-			}
-		}
-	}
-	//["/usr/bin/rsync", "--verbose", "--archive", "--delete", "-z", "--copy-links", "--no-owner", "--no-group", "--rsync-path", "sudo rsync", "-e",
-	// "ssh -p 22 -o LogLevel=FATAL  -o ControlMaster=auto -o ControlPath=/tmp/vagrant-rsync-20181227-31508-1sjw4bm -o ControlPersist=10m  -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i '/home/fboltz/.ssh/id_rsa'",
-	// "--exclude", ".vagrant/", "/home/fboltz/Projects/vagrant-multipass/", "vagrant@10.196.85.125:/vagrant"]
-	return "", nil
 }
 
 // CheckIfIPIsReady method SSH test IP
@@ -319,7 +134,7 @@ func (vm *AutoScalerServerNode) CheckIfIPIsReady(nodename, address string) error
 	var err error
 
 	// Set hostname
-	if _, err = utils.Sudo(vm.serverConfig.SSH, address, 0.5, fmt.Sprintf("hostnamectl set-hostname %s", nodename)); err != nil {
+	if _, err = utils.Sudo(vm.serverConfig.SSH, address, 1, fmt.Sprintf("hostnamectl set-hostname %s", nodename)); err != nil {
 		return err
 	}
 
@@ -327,13 +142,13 @@ func (vm *AutoScalerServerNode) CheckIfIPIsReady(nodename, address string) error
 	if vm.serverConfig.CloudProvider == "aws" {
 		var nodeName string
 
-		if nodeName, err = utils.Sudo(vm.serverConfig.SSH, address, 0.5, "curl -s http://169.254.169.254/latest/meta-data/local-hostname"); err != nil {
+		if nodeName, err = utils.Sudo(vm.serverConfig.SSH, address, 1, "curl -s http://169.254.169.254/latest/meta-data/local-hostname"); err != nil {
 			return err
 		}
 
 		vm.NodeName = nodeName
 
-		glog.V(5).Infof("Launch VM:%s set to nodeName: %s", nodename, nodeName)
+		glog.Debugf("Launch VM:%s set to nodeName: %s", nodename, nodeName)
 	}
 
 	return nil
@@ -363,19 +178,45 @@ func (vm *AutoScalerServerNode) unregisterDNS(address string) error {
 	return err
 }
 
-func (vm *AutoScalerServerNode) launchVM(nodeLabels, systemLabels KubernetesLabel) error {
-	glog.V(5).Infof("AutoScalerNode::launchVM, node:%s", vm.InstanceName)
+func (vm *AutoScalerServerNode) kubeletDefault() *string {
+	var maxPods = vm.serverConfig.MaxPods
+	var kubeletExtraArgs string
+
+	if maxPods == 0 {
+		maxPods = 110
+	}
+
+	if vm.serverConfig.CloudProvider == "aws" {
+		kubeletExtraArgs = fmt.Sprintf("KUBELET_EXTRA_ARGS='$KUBELET_EXTRA_ARGS --cloud-provider=aws --max-pods=%d --node-ip=$LOCAL_IP --provider-id=%s' > /etc/default/kubelet", maxPods, vm.ProviderID)
+	} else {
+		kubeletExtraArgs = fmt.Sprintf("KUBELET_EXTRA_ARGS='$KUBELET_EXTRA_ARGS --max-pods=%d --node-ip=$LOCAL_IP --provider-id=%s' > /etc/default/kubelet", maxPods, vm.ProviderID)
+	}
+
+	kubeletDefault := []string{
+		"#!/bin/bash",
+		"source /etc/default/kubelet",
+		"LOCAL_IP=$(curl http://169.254.169.254/latest/meta-data/local-ipv4)",
+		"echo \"" + kubeletExtraArgs + "\"",
+		"systemctl restart kubelet",
+	}
+
+	result := strings.Join(kubeletDefault, "\n")
+
+	return &result
+}
+
+func (vm *AutoScalerServerNode) launchVM(c types.ClientGenerator, nodeLabels, systemLabels KubernetesLabel) error {
+	glog.Debugf("AutoScalerNode::launchVM, node:%s", vm.InstanceName)
 
 	var err error
 	var status AutoScalerServerNodeState
-	var output string
 	var address *string
 
 	aws := vm.AwsConfig
 
 	glog.Infof("Launch VM:%s for nodegroup: %s", vm.InstanceName, vm.NodeGroupID)
 
-	if vm.AutoProvisionned == false {
+	if !vm.AutoProvisionned {
 
 		err = fmt.Errorf(constantes.ErrVMNotProvisionnedByMe, vm.InstanceName)
 
@@ -383,7 +224,7 @@ func (vm *AutoScalerServerNode) launchVM(nodeLabels, systemLabels KubernetesLabe
 
 		err = fmt.Errorf(constantes.ErrVMAlreadyCreated, vm.InstanceName)
 
-	} else if vm.RunningInstance, err = aws.Create(vm.NodeIndex, vm.NodeGroupID, vm.InstanceName, vm.InstanceType, vm.Disk, vm.serverConfig.CloudInit); err != nil {
+	} else if vm.RunningInstance, err = aws.Create(vm.NodeIndex, vm.NodeGroupID, vm.InstanceName, vm.InstanceType, vm.Disk, vm.kubeletDefault()); err != nil {
 
 		err = fmt.Errorf(constantes.ErrUnableToLaunchVM, vm.InstanceName, err)
 
@@ -403,24 +244,20 @@ func (vm *AutoScalerServerNode) launchVM(nodeLabels, systemLabels KubernetesLabe
 
 		err = fmt.Errorf(constantes.ErrStartVMFailed, vm.InstanceName, err)
 
-	} else if output, err = vm.syncFolders(); err != nil {
-
-		err = fmt.Errorf(constantes.ErrRsyncError, vm.InstanceName, output, err)
-
-	} else if output, err = vm.prepareKubelet(); err != nil {
-
-		err = fmt.Errorf(constantes.ErrKubeletNotConfigured, vm.InstanceName, output, err)
-
 	} else if err = vm.kubeAdmJoin(); err != nil {
 
 		err = fmt.Errorf(constantes.ErrKubeAdmJoinFailed, vm.InstanceName, err)
 
-	} else if err = vm.waitReady(); err != nil {
+	} else if err = c.SetProviderID(vm.NodeName, vm.ProviderID); err != nil {
+
+		err = fmt.Errorf(constantes.ErrProviderIDNotConfigured, vm.NodeName, err)
+
+	} else if err = vm.waitReady(c); err != nil {
 
 		err = fmt.Errorf(constantes.ErrNodeIsNotReady, vm.InstanceName)
 
 	} else {
-		err = vm.setNodeLabels(nodeLabels, systemLabels)
+		err = vm.setNodeLabels(c, nodeLabels, systemLabels)
 	}
 
 	if err == nil {
@@ -432,17 +269,15 @@ func (vm *AutoScalerServerNode) launchVM(nodeLabels, systemLabels KubernetesLabe
 	return err
 }
 
-func (vm *AutoScalerServerNode) startVM() error {
-	glog.V(5).Infof("AutoScalerNode::startVM, node:%s", vm.InstanceName)
+func (vm *AutoScalerServerNode) startVM(c types.ClientGenerator) error {
+	glog.Debugf("AutoScalerNode::startVM, node:%s", vm.InstanceName)
 
 	var err error
 	var state AutoScalerServerNodeState
 
 	glog.Infof("Start VM:%s", vm.InstanceName)
 
-	kubeconfig := vm.serverConfig.KubeConfig
-
-	if vm.AutoProvisionned == false || vm.RunningInstance == nil {
+	if !vm.AutoProvisionned || vm.RunningInstance == nil {
 
 		err = fmt.Errorf(constantes.ErrVMNotProvisionnedByMe, vm.InstanceName)
 
@@ -469,16 +304,8 @@ func (vm *AutoScalerServerNode) startVM() error {
 			err = fmt.Errorf(constantes.ErrStartVMFailed, vm.InstanceName, err)
 
 		} else {
-			args := []string{
-				"kubectl",
-				"uncordon",
-				vm.NodeName,
-				"--kubeconfig",
-				kubeconfig,
-			}
-
-			if err = utils.Shell(args...); err != nil {
-				glog.Errorf(constantes.ErrKubeCtlIgnoredError, vm.InstanceName, err)
+			if err = c.UncordonNode(vm.NodeName); err != nil {
+				glog.Errorf(constantes.ErrUncordonNodeReturnError, vm.NodeName, err)
 
 				err = nil
 			}
@@ -498,17 +325,15 @@ func (vm *AutoScalerServerNode) startVM() error {
 	return err
 }
 
-func (vm *AutoScalerServerNode) stopVM() error {
-	glog.V(5).Infof("AutoScalerNode::stopVM, node:%s", vm.InstanceName)
+func (vm *AutoScalerServerNode) stopVM(c types.ClientGenerator) error {
+	glog.Debugf("AutoScalerNode::stopVM, node:%s", vm.InstanceName)
 
 	var err error
 	var state AutoScalerServerNodeState
 
 	glog.Infof("Stop VM:%s", vm.InstanceName)
 
-	kubeconfig := vm.serverConfig.KubeConfig
-
-	if vm.AutoProvisionned == false || vm.RunningInstance == nil {
+	if !vm.AutoProvisionned || vm.RunningInstance == nil {
 
 		err = fmt.Errorf(constantes.ErrVMNotProvisionnedByMe, vm.InstanceName)
 
@@ -518,16 +343,8 @@ func (vm *AutoScalerServerNode) stopVM() error {
 
 	} else if state == AutoScalerServerNodeStateRunning {
 
-		args := []string{
-			"kubectl",
-			"cordon",
-			vm.NodeName,
-			"--kubeconfig",
-			kubeconfig,
-		}
-
-		if err = utils.Shell(args...); err != nil {
-			glog.Errorf(constantes.ErrKubeCtlIgnoredError, vm.InstanceName, err)
+		if err = c.CordonNode(vm.NodeName); err != nil {
+			glog.Errorf(constantes.ErrCordonNodeReturnError, vm.NodeName, err)
 		}
 
 		if err = vm.RunningInstance.PowerOff(); err == nil {
@@ -551,47 +368,31 @@ func (vm *AutoScalerServerNode) stopVM() error {
 	return err
 }
 
-func (vm *AutoScalerServerNode) deleteVM() error {
-	glog.V(5).Infof("AutoScalerNode::deleteVM, node:%s", vm.InstanceName)
+func (vm *AutoScalerServerNode) deleteVM(c types.ClientGenerator) error {
+	glog.Debugf("AutoScalerNode::deleteVM, node:%s", vm.InstanceName)
 
 	var err error
 	var status *aws.Status
 
-	if vm.AutoProvisionned == false || vm.RunningInstance == nil {
+	if !vm.AutoProvisionned || vm.RunningInstance == nil {
 		err = fmt.Errorf(constantes.ErrVMNotProvisionnedByMe, vm.InstanceName)
 	} else {
-		kubeconfig := vm.serverConfig.KubeConfig
-
 		if status, err = vm.RunningInstance.Status(); err == nil {
-			vm.unregisterDNS(status.Address)
+			if err = vm.unregisterDNS(status.Address); err != nil {
+				glog.Warnf("unable to unregister DNS entry, reason: %v", err)
+			}
 
 			if status.Powered {
-				args := []string{
-					"kubectl",
-					"drain",
-					vm.NodeName,
-					"--delete-local-data",
-					"--force",
-					"--ignore-daemonsets",
-					"--kubeconfig",
-					kubeconfig,
+				if err = c.MarkDrainNode(vm.NodeName); err != nil {
+					glog.Errorf(constantes.ErrCordonNodeReturnError, vm.NodeName, err)
 				}
 
-				if err = utils.Shell(args...); err != nil {
-					glog.Errorf(constantes.ErrKubeCtlIgnoredError, vm.InstanceName, err)
+				if err = c.DrainNode(vm.NodeName, true, true); err != nil {
+					glog.Errorf(constantes.ErrDrainNodeReturnError, vm.NodeName, err)
 				}
 
-				args = []string{
-					"kubectl",
-					"delete",
-					"node",
-					vm.NodeName,
-					"--kubeconfig",
-					kubeconfig,
-				}
-
-				if err = utils.Shell(args...); err != nil {
-					glog.Errorf(constantes.ErrKubeCtlIgnoredError, vm.InstanceName, err)
+				if err = c.DeleteNode(vm.NodeName); err != nil {
+					glog.Errorf(constantes.ErrDeleteNodeReturnError, vm.NodeName, err)
 				}
 
 				if err = vm.RunningInstance.PowerOff(); err != nil {
@@ -620,7 +421,7 @@ func (vm *AutoScalerServerNode) deleteVM() error {
 }
 
 func (vm *AutoScalerServerNode) statusVM() (AutoScalerServerNodeState, error) {
-	glog.V(5).Infof("AutoScalerNode::statusVM, node:%s", vm.InstanceName)
+	glog.Debugf("AutoScalerNode::statusVM, node:%s", vm.InstanceName)
 
 	// Get VM infos
 	var status *aws.Status
@@ -657,11 +458,11 @@ func (vm *AutoScalerServerNode) setServerConfiguration(config *types.AutoScalerS
 }
 
 // cleanOnLaunchError called when error occurs during launch
-func (vm *AutoScalerServerNode) cleanOnLaunchError(err error) {
+func (vm *AutoScalerServerNode) cleanOnLaunchError(c types.ClientGenerator, err error) {
 	glog.Errorf(constantes.ErrUnableToLaunchVM, vm.InstanceName, err)
 
 	if status, _ := vm.statusVM(); status != AutoScalerServerNodeStateNotCreated {
-		if e := vm.deleteVM(); e != nil {
+		if e := vm.deleteVM(c); e != nil {
 			glog.Errorf(constantes.ErrUnableToDeleteVM, vm.InstanceName, e)
 		}
 	} else {

@@ -15,11 +15,11 @@ export MASTERKUBE="${NODEGROUP_NAME}-masterkube"
 export PROVIDERID="${SCHEME}://${NODEGROUP_NAME}/object?type=node&name=${MASTERKUBE}"
 export SSH_PRIVATE_KEY=~/.ssh/id_rsa
 export SSH_KEY=$(cat "${SSH_PRIVATE_KEY}.pub")
-export KUBERNETES_VERSION=v1.18.6
+export KUBERNETES_VERSION=v1.21.0
 export KUBECONFIG=${HOME}/.kube/config
 export ROOT_IMG_NAME=bionic-kubernetes
 export CNI_VERSION=v0.6.0
-export CNI_PLUGIN_VERSION=v0.8.6
+export CNI_PLUGIN_VERSION=v0.9.1
 export CNI_PLUGIN=aws
 export CLOUD_PROVIDER=aws
 export TARGET_IMAGE="${ROOT_IMG_NAME}-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}"
@@ -403,13 +403,11 @@ fi
 # Cloud init user-data
 echo "#cloud-config" >./config/userdata.yaml
 
-cat <<EOF | python2 -c "import json,sys,yaml; print yaml.safe_dump(json.load(sys.stdin), width=500, indent=4, default_flow_style=False)" >>./config/userdata.yaml
-{
-    "runcmd": [
-        "echo 'Create ${FQHOSTNAME}' > /var/log/masterkube.log",
-        "hostnamectl set-hostname ${FQHOSTNAME}"
-    ]
-}
+cat > ./config/userdata.yaml <<EOF
+#cloud-config
+runcmd:
+- echo "Create ${MASTERKUBE}" > /var/log/masterkube.log
+- hostnamectl set-hostname "${FQHOSTNAME}"
 EOF
 
 cat > ./config/mapping.json <<EOF
@@ -630,10 +628,6 @@ AUTOSCALER_CONFIG=$(cat <<EOF
             "vcpus": 8,
             "disksize": 10
         }
-    },
-    "cloud-init": {
-        "package_update": false,
-        "package_upgrade": false
     },
     "sync-folder": {
     },

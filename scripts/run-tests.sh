@@ -32,7 +32,7 @@ cat > ./aws/$TEST_CONFIG <<EOF
     "ami": "${SEED_IMAGE}",
     "iam-role-arn": "${IAM_ROLE_ARN}",
     "instanceName": "test-kubernetes-aws-autoscaler",
-    "instanceType": "t2.micro",
+    "instanceType": "t3a.micro",
     "diskSize": 10,
     "tags": [
          {
@@ -53,10 +53,6 @@ cat > ./aws/$TEST_CONFIG <<EOF
     "ssh": {
         "user": "$SEED_USER",
         "ssh-private-key": "~/.ssh/id_rsa"
-    },
-    "cloud-init": {
-        "package_update": false,
-        "package_upgrade": false
     }
 }
 EOF
