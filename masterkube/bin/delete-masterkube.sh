@@ -1,6 +1,8 @@
 #!/bin/bash
+
 CURDIR=$(dirname $0)
 NODEGROUP_NAME="aws-ca-k8s"
+MASTERKUBE=${NODEGROUP_NAME}-masterkube
 
 echo "Delete masterkube previous instance"
 
@@ -14,7 +16,7 @@ if [ -f ./cluster/config ]; then
     done
 fi
 
-./bin/kubeconfig-delete.sh $NODEGROUP_NAME-masterkube &> /dev/null
+./bin/kubeconfig-delete.sh $NODEGROUP_NAME &> /dev/null
 
 if [ -f config/aws-autoscaler.pid ]; then
     kill $(cat config/aws-autoscaler.pid)
@@ -23,9 +25,10 @@ fi
 find cluster ! -name '*.md' -type f -exec rm -f "{}" "+"
 find config ! -name '*.md' -type f -exec rm -f "{}" "+"
 
-# Extract the domain name from CERT
-export DOMAIN_NAME=$(openssl x509 -noout -subject -in ./etc/ssl/cert.pem | awk -F= '{print $NF}' | sed -e 's/^[ \t]*//' | sed 's/\*\.//g')
-
-sudo sed -i "/masterkube.${DOMAIN_NAME}/d" /etc/hosts
+if [ "$(uname -s)" == "Linux" ]; then
+    sudo sed -i "/${MASTERKUBE}/d" /etc/hosts
+else
+    sudo sed -i'' "/${MASTERKUBE}/d" /etc/hosts
+fi
 
 popd
