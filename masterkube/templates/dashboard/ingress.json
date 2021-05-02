@@ -2,7 +2,7 @@
   "apiVersion": "networking.k8s.io/v1",
   "kind": "Ingress",
   "metadata": {
-    "name": "masterkube-dashboard-server-ingress",
+    "name": "masterkube-aws-dashboard-server-ingress",
     "namespace": "kubernetes-dashboard",
     "annotations": {
       "nginx.ingress.kubernetes.io/ssl-redirect": "true",
@@ -16,14 +16,14 @@
     "tls": [
       {
         "hosts": [
-          "masterkube-dashboard.aldunelabs.com"
+          "masterkube-aws-dashboard.$DOMAIN_NAME"
         ],
         "secretName": "kubernetes-dashboard"
       }
     ],
     "rules": [
       {
-        "host": "masterkube-dashboard.aldunelabs.com",
+        "host": "masterkube-aws-dashboard.$DOMAIN_NAME",
         "http": {
           "paths": [
             {
