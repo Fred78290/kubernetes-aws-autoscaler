@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strconv"
 	"strings"
@@ -187,20 +188,20 @@ func (vm *AutoScalerServerNode) kubeletDefault() *string {
 	}
 
 	if vm.serverConfig.CloudProvider == "aws" {
-		kubeletExtraArgs = fmt.Sprintf("KUBELET_EXTRA_ARGS='$KUBELET_EXTRA_ARGS --cloud-provider=aws --max-pods=%d --node-ip=$LOCAL_IP --provider-id=%s' > /etc/default/kubelet", maxPods, vm.ProviderID)
+		kubeletExtraArgs = fmt.Sprintf("KUBELET_EXTRA_ARGS=\\\"$KUBELET_EXTRA_ARGS --cloud-provider=aws --max-pods=%d --node-ip=$LOCAL_IP --provider-id=%s\\\"", maxPods, vm.ProviderID)
 	} else {
-		kubeletExtraArgs = fmt.Sprintf("KUBELET_EXTRA_ARGS='$KUBELET_EXTRA_ARGS --max-pods=%d --node-ip=$LOCAL_IP --provider-id=%s' > /etc/default/kubelet", maxPods, vm.ProviderID)
+		kubeletExtraArgs = fmt.Sprintf("KUBELET_EXTRA_ARGS=\\\"$KUBELET_EXTRA_ARGS --max-pods=%d --node-ip=$LOCAL_IP --provider-id=%s\\\"", maxPods, vm.ProviderID)
 	}
 
 	kubeletDefault := []string{
 		"#!/bin/bash",
 		"source /etc/default/kubelet",
 		"LOCAL_IP=$(curl http://169.254.169.254/latest/meta-data/local-ipv4)",
-		"echo \"" + kubeletExtraArgs + "\"",
+		"echo \"" + kubeletExtraArgs + "\" > /etc/default/kubelet",
 		"systemctl restart kubelet",
 	}
 
-	result := strings.Join(kubeletDefault, "\n")
+	result := base64.StdEncoding.EncodeToString([]byte(strings.Join(kubeletDefault, "\n")))
 
 	return &result
 }
