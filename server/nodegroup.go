@@ -353,6 +353,7 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(client types.ClientGenera
 
 							err = client.AnnoteNode(nodeInfo.Name, map[string]string{
 								constantes.AnnotationScaleDownDisabled:    strconv.FormatBool(scaleDownDisabled && !node.AutoProvisionned),
+								constantes.NodeLabelGroupName:             g.NodeGroupIdentifier,
 								constantes.AnnotationInstanceName:         instanceName,
 								constantes.AnnotationInstanceID:           *ec2Instance.InstanceID,
 								constantes.AnnotationNodeAutoProvisionned: strconv.FormatBool(node.AutoProvisionned),
