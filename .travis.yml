@@ -49,7 +49,7 @@ jobs:
         skip_cleanup: true
         on:
           tags: true
-          repo: Fred78290/kubernetes-vmware-autoscaler
+          repo: Fred78290/kubernetes-aws-autoscaler
         file:
           - aws-autoscaler-amd64
           - aws-autoscaler-arm64
