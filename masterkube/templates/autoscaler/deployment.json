@@ -48,7 +48,7 @@
                 ],
                 "containers": [
                     {
-                        "image": "$REGISTRY/aws-autoscaler:v1.21.0",
+                        "image": "$REGISTRY/aws-autoscaler:v1.21.0-dev",
                         "name": "aws-autoscaler",
                         "resources": {
                             "limits": {

@@ -44,6 +44,7 @@ export MAX_PODS=110
 export MASTER_PROFILE_NAME="kubernetes-master-profile"
 export WORKER_PROFILE_NAME="kubernetes-worker-profile"
 export TARGET_IMAGE="${ROOT_IMG_NAME}-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}-${SEED_ARCH}"
+export REGISTRY=fred78290
 
 export SEED_ARCH="<to be filled>"
 export SEED_USER="<to be filled>"
