@@ -32,15 +32,13 @@
                 "containers": [
                     {
                         "name": "metrics-server",
-                        "image": "k8s.gcr.io/metrics-server/metrics-server:v0.3.7",
+                        "image": "k8s.gcr.io/metrics-server/metrics-server:v0.4.2",
                         "imagePullPolicy": "IfNotPresent",
                         "args": [
                             "--cert-dir=/tmp",
                             "--secure-port=4443",
                             "--kubelet-insecure-tls",
-                            "--kubelet-preferred-address-types=InternalIP,Hostname,ExternalIP",
-                            "--deprecated-kubelet-completely-insecure",
-                            "--kubelet-port=10255"
+                            "--kubelet-preferred-address-types=InternalIP,Hostname,ExternalIP"
                         ],
                         "ports": [
                             {
