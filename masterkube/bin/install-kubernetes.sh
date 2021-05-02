@@ -2,6 +2,12 @@
 KUBERNETES_VERSION=$1
 CNI_VERSION="v0.9.1"
 
+if [ "$(uname -p)" == "aarch64" ];  then
+	ARCH="arm64"
+else
+	ARCH="amd64"
+fi
+
 curl -s https://get.docker.com | bash
 
 if [ "x$KUBERNETES_VERSION" == "x" ]; then
@@ -13,11 +19,11 @@ fi
 echo "Prepare kubernetes version $RELEASE"
 
 mkdir -p /opt/cni/bin
-curl -L "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-amd64-${CNI_VERSION}.tgz" | tar -C /opt/cni/bin -xz
+curl -L "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-${ARCH}-${CNI_VERSION}.tgz" | tar -C /opt/cni/bin -xz
 
 mkdir -p /usr/local/bin
 cd /usr/local/bin
-curl -L --remote-name-all https://storage.googleapis.com/kubernetes-release/release/${RELEASE}/bin/linux/amd64/{kubeadm,kubelet,kubectl}
+curl -L --remote-name-all https://storage.googleapis.com/kubernetes-release/release/${RELEASE}/bin/linux/${ARCH}/{kubeadm,kubelet,kubectl}
 chmod +x /usr/local/bin/kube*
 
 echo "KUBELET_EXTRA_ARGS='--fail-swap-on=false --read-only-port=10255'" > /etc/default/kubelet

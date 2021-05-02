@@ -10,106 +10,66 @@ VERSION_BUILD ?= 0
 TAG?=v$(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_BUILD)
 FLAGS=
 ENVVAR=
-GOOS?=linux
+GOOS?=$(shell go env GOOS)
 GOARCH?=$(shell go env GOARCH)
 REGISTRY?=fred78290
 BUILD_DATE?=`date +%Y-%m-%dT%H:%M:%SZ`
 VERSION_LDFLAGS=-X main.phVersion=$(TAG)
-
-ifdef BUILD_TAGS
-  TAGS_FLAG=--tags ${BUILD_TAGS}
-  PROVIDER=-${BUILD_TAGS}
-  FOR_PROVIDER=" for ${BUILD_TAGS}"
-else
-  TAGS_FLAG=
-  PROVIDER=
-  FOR_PROVIDER=
-endif
-
-IMAGE=$(REGISTRY)/aws-autoscaler$(PROVIDER)
+IMAGE=$(REGISTRY)/aws-autoscaler
 
 deps:
 	go mod vendor
 #	wget "https://raw.githubusercontent.com/Fred78290/autoscaler/master/cluster-autoscaler/cloudprovider/grpc/grpc.proto" -O grpc/grpc.proto
 #	protoc -I . -I vendor grpc/grpc.proto --go_out=plugins=grpc:.
 
-build: build-arch-$(GOARCH)
+build: $(addprefix build-arch-,$(ALL_ARCH))
 
 build-arch-%: deps clean-arch-%
-	$(ENVVAR) GOOS=$(GOOS) GOARCH=$* go build -ldflags="-X main.phVersion=$(TAG) -X main.phBuildDate=$(BUILD_DATE)" -a -o out/aws-autoscaler-$* ${TAGS_FLAG}
+	$(ENVVAR) GOOS=$(GOOS) GOARCH=$* go build -ldflags="-X main.phVersion=$(TAG) -X main.phBuildDate=$(BUILD_DATE)" -a -o out/$(GOOS)/$*/aws-autoscaler
 
 test-unit: clean build
-	go test --test.short -race ./... ${TAGS_FLAG}
+	go get -u github.com/aws/govmomi/vcsim
+	bash ./scripts/run-tests.sh
 
-dev-release: $(addprefix dev-release-arch-,$(ALL_ARCH)) push-manifest
-
-dev-release-arch-%: build-arch-% make-image-arch-% push-image-arch-%
-	@echo "Release ${TAG}${FOR_PROVIDER}-$* completed"
-
-make-image: make-image-arch-$(GOARCH)
+make-image: $(addprefix make-image-arch-,$(ALL_ARCH))
 
 make-image-arch-%:
-ifdef BASEIMAGE
-	docker build --pull --build-arg BASEIMAGE=${BASEIMAGE} \
-		-t ${IMAGE}-$*:${TAG} \
-		-f Dockerfile.$* .
-else
-	docker build --pull \
-		-t ${IMAGE}-$*:${TAG} \
-		-f Dockerfile.$* .
-endif
-	@echo "Image ${TAG}${FOR_PROVIDER}-$* completed"
+	docker build --pull -t ${IMAGE}-$*:${TAG} -f Dockerfile.$* .
+	@echo "Image ${TAG}-$* completed"
 
-push-image: push-image-arch-$(GOARCH)
+push-image: $(addprefix push-image-arch-,$(ALL_ARCH))
 
 push-image-arch-%:
-	./push_image.sh ${IMAGE}-$*:${TAG}
-
-docker-push: docker-push-arch-$(GOARCH)
-
-docker-push-arch-%:
 	docker push ${IMAGE}-$*:${TAG}
 
 push-manifest:
-	docker manifest create ${IMAGE}:${TAG} \
-	    $(addprefix --amend $(REGISTRY)/aws-autoscaler$(PROVIDER)-, $(addsuffix :$(TAG), $(ALL_ARCH)))
-	docker manifest push --purge ${IMAGE}:${TAG}
+	docker buildx build --pull --platform linux/amd64,linux/arm64 --push -t ${IMAGE}:${TAG} .
+	@echo "Image ${TAG}* completed"
 
-container-push-manifest: container $(addprefix docker-push-arch-,$(ALL_ARCH)) push-manifest
+container-push-manifest: container push-manifest
 
-
-execute-release: $(addprefix make-image-arch-,$(ALL_ARCH)) $(addprefix push-image-arch-,$(ALL_ARCH)) push-manifest
-	@echo "Release ${TAG}${FOR_PROVIDER} completed"
-
-clean: clean-arch-$(GOARCH)
+clean: $(addprefix clean-arch-,$(ALL_ARCH))
 
 clean-arch-%:
-	rm -f ./out/aws-autoscaler$(PROVIDER)-$*
-
-format:
-	test -z "$$(find . -path ./vendor -prune -type f -o -name '*.go' -exec gofmt -s -d {} + | tee /dev/stderr)" || \
-    test -z "$$(find . -path ./vendor -prune -type f -o -name '*.go' -exec gofmt -s -w {} + | tee /dev/stderr)"
+	rm -f ./out/$(GOOS)/$*/aws-autoscaler
 
 docker-builder:
 	docker build -t kubernetes-aws-autoscaler-builder ./builder
 
-build-in-docker: build-in-docker-arch-$(GOARCH)
+build-in-docker: $(addprefix build-in-docker-arch-,$(ALL_ARCH))
 
 build-in-docker-arch-%: clean-arch-% docker-builder
 	docker run --rm -v `pwd`:/gopath/src/github.com/Fred78290/aws-autoscaler/ kubernetes-aws-autoscaler-builder:latest bash \
 		-c 'cd /gopath/src/github.com/Fred78290/aws-autoscaler \
 		&& BUILD_TAGS=${BUILD_TAGS} make -e REGISTRY=${REGISTRY} -e TAG=${TAG} -e BUILD_DATE=`date +%Y-%m-%dT%H:%M:%SZ` build-arch-$*'
 
-release: $(addprefix build-in-docker-arch-,$(ALL_ARCH)) execute-release
-	@echo "Full in-docker release ${TAG}${FOR_PROVIDER} completed"
-
 container: $(addprefix container-arch-,$(ALL_ARCH))
 
-container-arch-%: build-in-docker-arch-% make-image-arch-%
-	@echo "Full in-docker image ${TAG}${FOR_PROVIDER}-$* completed"
+container-arch-%: build-in-docker-arch-%
+	@echo "Full in-docker image ${TAG}-$* completed"
 
-test-in-docker: clean docker-builder
+test-in-docker: docker-builder
 	docker run --rm -v `pwd`:/gopath/src/github.com/Fred78290/kubernetes-aws-autoscaler/ kubernetes-aws-autoscaler-builder:latest bash \
 		-c 'cd /gopath/src/github.com/Fred78290/kubernetes-aws-autoscaler && bash ./scripts/run-tests.sh'
 
-.PHONY: all build test-unit clean format execute-release dev-release docker-builder build-in-docker release generate push-image push-manifest
+.PHONY: all build test-unit clean docker-builder build-in-docker push-image push-manifest

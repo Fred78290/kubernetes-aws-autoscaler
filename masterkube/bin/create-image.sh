@@ -8,11 +8,13 @@ CNI_PLUGIN_VERSION=v0.9.1
 CNI_PLUGIN=aws
 SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
 CACHE=~/.local/aws/cache
-TARGET_IMAGE="bionic-kubernetes-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}"
+TARGET_IMAGE="focal-kubernetes-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}-amd64"
 OSDISTRO=$(uname -s)
 SSH_KEYNAME="aws-k8s-key"
 CURDIR=$(dirname $0)
 FORCE=NO
+INSTANCE_IMAGE=t3a.small
+SEED_ARCH=amd64
 SEED_USER=ubuntu
 SEED_IMAGE="<to be filled>"
 VPC_MASTER_SUBNET_ID="<to be filled>"
@@ -52,7 +54,7 @@ function get_ecs_container_account_for_region () {
 
 mkdir -p $CACHE
 
-TEMP=`getopt -o fc:i:k:n:op:s:u:v: --long ecr-password:,force,profile:,region:,subnet-id:,sg-id:,use-public-ip:,user:,ami:,custom-image:,ssh-key:,ssh-key-name:,cni-plugin:,cni-version:,cni-plugin-version:,kubernetes-version: -n "$0" -- "$@"`
+TEMP=`getopt -o fc:i:k:n:op:s:u:v: --long arch:,ecr-password:,force,profile:,region:,subnet-id:,sg-id:,use-public-ip:,user:,ami:,custom-image:,ssh-key:,ssh-key-name:,cni-plugin:,cni-version:,cni-plugin-version:,kubernetes-version: -n "$0" -- "$@"`
 eval set -- "$TEMP"
 
 # extract options and their arguments into variables.
@@ -72,6 +74,7 @@ while true ; do
         -v|--kubernetes-version) KUBERNETES_VERSION=$2 ; shift 2;;
 
         --ami) SEED_IMAGE=$2 ; shift 2;;
+        --arch) SEED_ARCH=$2 ; shift 2;;
         --ecr-password) ECR_PASSWORD=$2 ; shift 2;;
         --ssh-key-name) SSH_KEY_NAME=$2 ; shift 2;;
         --subnet-id) VPC_MASTER_SUBNET_ID="${2}" ; shift 2;;
@@ -82,6 +85,15 @@ while true ; do
         *) echo "$1 - Internal error!" ; exit 1 ;;
     esac
 done
+
+if [ "$SEED_ARCH" == "amd64" ]; then
+    INSTANCE_TYPE=t3a.small
+elif [ "$SEED_ARCH" == "arm64" ]; then
+    INSTANCE_TYPE=t4g.small
+else
+    echo "Unsupported architecture: $SEED_ARCH"
+    exit -1
+fi
 
 TARGET_IMAGE_ID=$(aws ec2 describe-images --profile ${AWS_PROFILE} --region ${AWS_REGION} --filters "Name=architecture,Values=x86_64" "Name=name,Values=${TARGET_IMAGE}" "Name=virtualization-type,Values=hvm" 2>/dev/null | jq '.Images[0].ImageId' | tr -d '"' | sed -e 's/null//g')
 SOURCE_IMAGE_ID=$(aws ec2 describe-images --profile ${AWS_PROFILE} --region ${AWS_REGION} --image-ids "${SEED_IMAGE}" 2>/dev/null | jq '.Images[0].ImageId' | tr -d '"' | sed -e 's/null//g')
@@ -130,6 +142,7 @@ EOF
 
 cat > "${CACHE}/prepare-image.sh" << EOF
 #!/bin/bash
+SEED_ARCH=${SEED_ARCH}
 CNI_VERSION=${CNI_VERSION}
 CNI_PLUGIN=${CNI_PLUGIN}
 CNI_PLUGIN_VERSION=${CNI_PLUGIN_VERSION}
@@ -229,18 +242,18 @@ echo "Prepare to install CNI plugins"
 
 case $CNI_PLUGIN_VERSION in
     v0.7*)
-        URL_PLUGINS="https://github.com/containernetworking/plugins/releases/download/${CNI_PLUGIN_VERSION}/cni-plugins-amd64-${CNI_PLUGIN_VERSION}.tgz"
+        URL_PLUGINS="https://github.com/containernetworking/plugins/releases/download/${CNI_PLUGIN_VERSION}/cni-plugins-${SEED_ARCH}-${CNI_PLUGIN_VERSION}.tgz"
     ;;
     *)
-        URL_PLUGINS="https://github.com/containernetworking/plugins/releases/download/${CNI_PLUGIN_VERSION}/cni-plugins-linux-amd64-${CNI_PLUGIN_VERSION}.tgz"
+        URL_PLUGINS="https://github.com/containernetworking/plugins/releases/download/${CNI_PLUGIN_VERSION}/cni-plugins-linux-${SEED_ARCH}-${CNI_PLUGIN_VERSION}.tgz"
     ;;
 esac
 
 curl -L "${URL_PLUGINS}" | tar -C /opt/cni/bin -xz
-curl -L "https://github.com/containernetworking/cni/releases/download/${CNI_VERSION}/cni-amd64-${CNI_VERSION}.tgz" | tar -C /opt/cni/bin -xz
+curl -L "https://github.com/containernetworking/cni/releases/download/${CNI_VERSION}/cni-${SEED_ARCH}-${CNI_VERSION}.tgz" | tar -C /opt/cni/bin -xz
 
 cd /usr/local/bin
-curl -L --remote-name-all https://storage.googleapis.com/kubernetes-release/release/${KUBERNETES_VERSION}/bin/linux/amd64/{kubeadm,kubelet,kubectl,kube-proxy}
+curl -L --remote-name-all https://storage.googleapis.com/kubernetes-release/release/${KUBERNETES_VERSION}/bin/linux/${SEED_ARCH}/{kubeadm,kubelet,kubectl,kube-proxy}
 chmod +x /usr/local/bin/kube*
 
 mkdir -p /etc/systemd/system/kubelet.service.d
@@ -357,7 +370,7 @@ LAUNCHED_INSTANCE=$(aws ec2 run-instances \
     --region ${AWS_REGION} \
     --image-id ${SEED_IMAGE} \
     --count 1  \
-    --instance-type t3a.micro \
+    --instance-type ${INSTANCE_TYPE} \
     --key-name ${SSH_KEYNAME} \
     --subnet-id ${VPC_MASTER_SUBNET_ID} \
     --security-group-ids ${VPC_MASTER_SECURITY_GROUPID} \

@@ -13,11 +13,18 @@
 # limitations under the License.
 
 #ARG BASEIMAGE=gcr.io/distroless/static:latest-amd64
-ARG BASEIMAGE=ubuntu:focal
-FROM $BASEIMAGE
+FROM alpine AS builder
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+
+COPY out .
+RUN ls / ; mv /$TARGETPLATFORM/aws-autoscaler /aws-autoscaler
+
+FROM ubuntu:focal
+
 LABEL maintainer="Frederic Boltz <frederic.boltz@gmail.com>"
 
-COPY out/linux/amd64/aws-autoscaler /usr/local/bin/aws-autoscaler
+COPY --from=builder /aws-autoscaler /usr/local/bin/aws-autoscaler
 
 EXPOSE 5200
 

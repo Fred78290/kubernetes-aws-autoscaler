@@ -17,12 +17,11 @@ export SSH_PRIVATE_KEY=~/.ssh/id_rsa
 export SSH_KEY=$(cat "${SSH_PRIVATE_KEY}.pub")
 export KUBERNETES_VERSION=v1.21.0
 export KUBECONFIG=${HOME}/.kube/config
-export ROOT_IMG_NAME=bionic-kubernetes
+export ROOT_IMG_NAME=focal-kubernetes
 export CNI_VERSION=v0.6.0
 export CNI_PLUGIN_VERSION=v0.9.1
 export CNI_PLUGIN=aws
 export CLOUD_PROVIDER=aws
-export TARGET_IMAGE="${ROOT_IMG_NAME}-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}"
 export MINNODES=0
 export MAXNODES=5
 export MAXTOTALNODES=${MAXNODES}
@@ -44,7 +43,9 @@ export VOLUME_SIZE=10
 export MAX_PODS=110
 export MASTER_PROFILE_NAME="kubernetes-master-profile"
 export WORKER_PROFILE_NAME="kubernetes-worker-profile"
+export TARGET_IMAGE="${ROOT_IMG_NAME}-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}-${SEED_ARCH}"
 
+export SEED_ARCH="<to be filled>"
 export SEED_USER="<to be filled>"
 export SEED_IMAGE="<to be filled>"
 export MASTER_INSTANCE_PROFILE_ARN="<to be filled>"
@@ -74,7 +75,7 @@ else
     BASE64="base64"
 fi
 
-TEMP=$(getopt -o p:r:k:n:p:s:t: --long cloud-provider:,max-pods:,profile:,region:,node-group:,target-image:,seed-image:,seed-user:,vpc-id:,public-subnet-id:,public-sg-id:,private-subnet-id:,private-sg-id:,transport:,ssh-private-key:,cni-version:,cni-plugin-version:,kubernetes-version:,max-nodes-total:,cores-total:,memory-total:,max-autoprovisioned-node-group-count:,scale-down-enabled:,scale-down-delay-after-add:,scale-down-delay-after-delete:,scale-down-delay-after-failure:,scale-down-unneeded-time:,scale-down-unready-time:,unremovable-node-recheck-timeout: -n "$0" -- "$@")
+TEMP=$(getopt -o p:r:k:n:p:s:t: --long seed-arch:,cloud-provider:,max-pods:,profile:,region:,node-group:,target-image:,seed-image:,seed-user:,vpc-id:,public-subnet-id:,public-sg-id:,private-subnet-id:,private-sg-id:,transport:,ssh-private-key:,cni-version:,cni-plugin-version:,kubernetes-version:,max-nodes-total:,cores-total:,memory-total:,max-autoprovisioned-node-group-count:,scale-down-enabled:,scale-down-delay-after-add:,scale-down-delay-after-delete:,scale-down-delay-after-failure:,scale-down-unneeded-time:,scale-down-unready-time:,unremovable-node-recheck-timeout: -n "$0" -- "$@")
 
 eval set -- "${TEMP}"
 
@@ -104,6 +105,11 @@ while true; do
 
     --target-image)
         ROOT_IMG_NAME="$2"
+        shift 2
+        ;;
+
+    --seed-arch)
+        SEED_ARCH=$2
         shift 2
         ;;
 
@@ -273,7 +279,7 @@ if [ -z $TAGGED ]; then
     aws ec2 create-tags --profile ${AWS_PROFILE} --region ${AWS_REGION} --resources ${VPC_WORKER_SUBNET_ID} --tags "Key=kubernetes.io/cluster/${NODEGROUP_NAME},Value=owned" 2> /dev/null
 fi
 
-TARGET_IMAGE="${ROOT_IMG_NAME}-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}"
+TARGET_IMAGE="${ROOT_IMG_NAME}-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}-${SEED_ARCH}"
 KEYEXISTS=$(aws ec2 describe-key-pairs --profile ${AWS_PROFILE} --region ${AWS_REGION} --key-names "${SSH_KEYNAME}" | jq  '.KeyPairs[].KeyName' | tr -d '"')
 ECR_PASSWORD=$(aws ecr get-login-password  --profile ${AWS_PROFILE} --region us-west-2)
 
@@ -366,6 +372,7 @@ if [ -z "${TARGET_IMAGE_AMI}" ]; then
         --ecr-password="${ECR_PASSWORD}" \
         --custom-image="${TARGET_IMAGE}" \
         --kubernetes-version="${KUBERNETES_VERSION}" \
+        --arch="${SEED_ARCH}" \
         --ami="${SEED_IMAGE}" \
         --user="${SEED_USER}" \
         --ssh-key="${SSH_KEY}" \
@@ -469,11 +476,11 @@ LAUNCHED_INSTANCE=$(aws ec2  describe-instances --profile ${AWS_PROFILE} --regio
 
 if [ "${VPC_MASTER_USE_PUBLICIP}" == "true" ]; then
     export IPADDR=$(echo ${LAUNCHED_INSTANCE} | jq '.PublicIpAddress' | tr -d '"' | sed -e 's/null//g')
-    CERT_EXTRA_SANS="--cert-extra-sans ${IPADDR},${MASTERKUBE}.${DOMAIN_NAME},masterkube.${DOMAIN_NAME},masterkube-dashboard.${DOMAIN_NAME}"
+    CERT_EXTRA_SANS="--cert-extra-sans ${IPADDR},${MASTERKUBE}.${DOMAIN_NAME},masterkube-aws.${DOMAIN_NAME},masterkube-aws-dashboard.${DOMAIN_NAME}"
     IP_TYPE="public"
 else
     export IPADDR=$(echo ${LAUNCHED_INSTANCE} | jq '.PrivateIpAddress' | tr -d '"' | sed -e 's/null//g')
-    CERT_EXTRA_SANS="--cert-extra-sans ${MASTERKUBE}.${DOMAIN_NAME},masterkube.${DOMAIN_NAME},masterkube-dashboard.${DOMAIN_NAME}"
+    CERT_EXTRA_SANS="--cert-extra-sans ${MASTERKUBE}.${DOMAIN_NAME},masterkube-aws.${DOMAIN_NAME},masterkube-aws-dashboard.${DOMAIN_NAME}"
     IP_TYPE="private"
 fi
 
@@ -533,14 +540,14 @@ scp ${SSH_OPTIONS} ${SEED_USER}@${IPADDR}:/etc/cluster/* ./cluster
 
 # Update /etc/hosts
 if [ "${OSDISTRO}" == "Linux" ]; then
-    sudo sed -i "/masterkube.${DOMAIN_NAME}/d" /etc/hosts
+    sudo sed -i "/${MASTERKUBE}.${DOMAIN_NAME}/d" /etc/hosts
     sed -i -E "s/https:\/\/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:([0-9]+)/https:\/\/${MASTERKUBE}.${DOMAIN_NAME}:\1/g" cluster/config
 else
-    sudo sed -i'' "/masterkube.${DOMAIN_NAME}/d" /etc/hosts
+    sudo sed -i'' "/${MASTERKUBE}.${DOMAIN_NAME}/d" /etc/hosts
     sed -i'' -E "s/https:\/\/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:([0-9]+)/https:\/\/${MASTERKUBE}.${DOMAIN_NAME}:\1/g" cluster/config
 fi
 
-sudo bash -c "echo '${IPADDR} ${MASTERKUBE}.${DOMAIN_NAME} masterkube.${DOMAIN_NAME} masterkube-dashboard.${DOMAIN_NAME}' >> /etc/hosts"
+sudo bash -c "echo '${IPADDR} ${MASTERKUBE}.${DOMAIN_NAME} masterkube-aws.${DOMAIN_NAME} masterkube-aws-dashboard.${DOMAIN_NAME}' >> /etc/hosts"
 
 MASTER_IP=$(cat ./cluster/manager-ip)
 TOKEN=$(cat ./cluster/token)

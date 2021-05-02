@@ -33,6 +33,12 @@ export MAX_PODS=110
 export PRIVATE_DOMAIN_NAME=
 export ROUTE53_ZONEID=
 
+if [ "$(uname -p)" == "aarch64" ];  then
+	ARCH="arm64"
+else
+	ARCH="amd64"
+fi
+
 TEMP=$(getopt -o p:n:c:k:s: --long private-zone-id:,private-zone-name:,cloud-provider:,max-pods:,node-group:,cert-extra-sans:,cni-plugin:,kubernetes-version: -n "$0" -- "$@")
 
 eval set -- "${TEMP}"
@@ -147,9 +153,9 @@ case $CNI_PLUGIN in
 
         POD_NETWORK_CIDR="192.168.0.0/16"
 
-        curl -s -O -L "https://github.com/projectcalico/calicoctl/releases/download/v3.18.2/calicoctl-linux-amd64"
-        chmod +x calicoctl-linux-amd64
-        mv calicoctl-linux-amd64 /usr/local/bin/calicoctl
+        curl -s -O -L "https://github.com/projectcalico/calicoctl/releases/download/v3.18.2/calicoctl-linux-${ARCH}"
+        chmod +x calicoctl-linux-${ARCH}
+        mv calicoctl-linux-${ARCH} /usr/local/bin/calicoctl
         ;;
     *)
         echo "CNI_PLUGIN '$CNI_PLUGIN' is not supported"
@@ -202,8 +208,6 @@ clusterDNS:
 - ${CLUSTER_DNS}
 failSwapOn: false
 hairpinMode: hairpin-veth
-featureGates:
-  VolumeSubpathEnvExpansion: true
 readOnlyPort: 10255
 clusterDomain: cluster.local
 cpuManagerReconcilePeriod: 0s
