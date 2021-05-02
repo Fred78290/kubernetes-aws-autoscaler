@@ -86,7 +86,7 @@ jobs:
         run: make -e REGISTRY=$REGISTRY -e TAG="${{ steps.prep.outputs.tag }}" test-in-docker
       - name: Fix directory owner
         shell: bash
-        run: sudo chown -R $USER vendor
+        run: "[ -e vendor ] && sudo chown -R $USER vendor"
   sonarcloud:
     if: startsWith(github.ref, 'refs/heads/')
     name: SonarCloud
