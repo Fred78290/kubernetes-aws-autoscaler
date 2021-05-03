@@ -25,6 +25,7 @@ FROM ubuntu:focal
 LABEL maintainer="Frederic Boltz <frederic.boltz@gmail.com>"
 
 COPY --from=builder /aws-autoscaler /usr/local/bin/aws-autoscaler
+RUN chmod uog+x /usr/local/bin/aws-autoscaler
 
 EXPOSE 5200
 
