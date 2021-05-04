@@ -2,6 +2,11 @@
     "Version": "2012-10-17",
     "Statement": [
         {
+            "Action": "route53:*",
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
             "Action": "ec2:*",
             "Effect": "Allow",
             "Resource": "*"
