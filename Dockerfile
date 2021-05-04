@@ -17,13 +17,17 @@ FROM alpine AS builder
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 
+RUN apk add -U --no-cache ca-certificates
+
 COPY out .
-RUN ls / ; mv /$TARGETPLATFORM/aws-autoscaler /aws-autoscaler
+
+RUN mv /$TARGETPLATFORM/aws-autoscaler /aws-autoscaler
 
 FROM ubuntu:focal
 
 LABEL maintainer="Frederic Boltz <frederic.boltz@gmail.com>"
 
+COPY --from=builder /etc/ssl /etc/ssl
 COPY --from=builder /aws-autoscaler /usr/local/bin/aws-autoscaler
 RUN chmod uog+x /usr/local/bin/aws-autoscaler
 
