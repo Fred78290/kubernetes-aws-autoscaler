@@ -24,4 +24,4 @@ done
 
 echo
 
-kubectl wait --kubeconfig=./cluster/config --namespace $K8NAMESPACE --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=120s
+kubectl wait --kubeconfig=./cluster/config --namespace $K8NAMESPACE --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=240s
