@@ -743,8 +743,6 @@ AUTOSCALER_CONFIG=$(cat <<EOF
 EOF
 )
 
-echo $AUTOSCALER_CONFIG
-
 echo "${AUTOSCALER_CONFIG}" | jq . > config/kubernetes-aws-autoscaler.json
 
 # Recopy config file on master node
