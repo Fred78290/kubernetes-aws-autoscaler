@@ -15,7 +15,7 @@ export MASTERKUBE="${NODEGROUP_NAME}-masterkube"
 export PROVIDERID="${SCHEME}://${NODEGROUP_NAME}/object?type=node&name=${MASTERKUBE}"
 export SSH_PRIVATE_KEY=~/.ssh/id_rsa
 export SSH_KEY=$(cat "${SSH_PRIVATE_KEY}.pub")
-export KUBERNETES_VERSION=v1.21.0
+export KUBERNETES_VERSION=v1.20.5
 export KUBECONFIG=${HOME}/.kube/config
 export ROOT_IMG_NAME=focal-kubernetes
 export CNI_VERSION=v0.6.0
@@ -742,8 +742,6 @@ AUTOSCALER_CONFIG=$(cat <<EOF
 }
 EOF
 )
-
-echo $AUTOSCALER_CONFIG
 
 echo "${AUTOSCALER_CONFIG}" | jq . > config/kubernetes-aws-autoscaler.json
 

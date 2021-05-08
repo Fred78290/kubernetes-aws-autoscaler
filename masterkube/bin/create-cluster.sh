@@ -4,7 +4,7 @@ set -e
 
 export CNI_PLUGIN=aws
 export CLOUD_PROVIDER=aws
-export KUBERNETES_VERSION=v1.21.0
+export KUBERNETES_VERSION=v1.20.5
 export CLUSTER_DIR=/etc/cluster
 export SCHEME="aws"
 export NODEGROUP_NAME="aws-ca-k8s"
