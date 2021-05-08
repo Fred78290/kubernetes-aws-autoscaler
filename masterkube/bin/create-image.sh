@@ -8,7 +8,6 @@ CNI_PLUGIN_VERSION=v0.9.1
 CNI_PLUGIN=aws
 SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
 CACHE=~/.local/aws/cache
-TARGET_IMAGE="focal-kubernetes-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}-amd64"
 OSDISTRO=$(uname -s)
 SSH_KEYNAME="aws-k8s-key"
 CURDIR=$(dirname $0)
@@ -17,6 +16,7 @@ INSTANCE_IMAGE=t3a.small
 SEED_ARCH=amd64
 SEED_USER=ubuntu
 SEED_IMAGE="<to be filled>"
+TARGET_IMAGE=
 VPC_MASTER_SUBNET_ID="<to be filled>"
 VPC_MASTER_SECURITY_GROUPID="<to be filled>"
 
@@ -85,6 +85,10 @@ while true ; do
         *) echo "$1 - Internal error!" ; exit 1 ;;
     esac
 done
+
+if [ -z "$TARGET_IMAGE" ]; then
+    TARGET_IMAGE="focal-kubernetes-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}-${SEED_ARCH}"
+fi
 
 if [ "$SEED_ARCH" == "amd64" ]; then
     INSTANCE_TYPE=t3a.small

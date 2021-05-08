@@ -46,9 +46,12 @@ export WORKER_PROFILE_NAME="kubernetes-worker-profile"
 export TARGET_IMAGE="${ROOT_IMG_NAME}-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}-${SEED_ARCH}"
 export REGISTRY=fred78290
 
-export SEED_ARCH="<to be filled>"
-export SEED_USER="<to be filled>"
-export SEED_IMAGE="<to be filled>"
+# aws region eu-west1
+export SEED_ARCH=amd64
+export SEED_USER=ubuntu
+export SEED_IMAGE_AMD64="ami-08bac620dc84221eb"
+export SEED_IMAGE_ARM64="ami-09e0d6fdf60750e33"
+# defined in private aws.defs
 export MASTER_INSTANCE_PROFILE_ARN="<to be filled>"
 export WORKER_INSTANCE_PROFILE_ARN="<to be filled>"
 export VPC_MASTER_SUBNET_ID="<to be filled>"
@@ -64,6 +67,7 @@ export VPC_WORKER_USE_PUBLICIP=false
 export LAUNCH_CA=YES
 export PRIVATE_DOMAIN_NAME=
 
+# import hidded definitions
 source ${CURDIR}/aws.defs
 
 SSH_OPTIONS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
@@ -76,7 +80,7 @@ else
     BASE64="base64"
 fi
 
-TEMP=$(getopt -o p:r:k:n:p:s:t: --long seed-arch:,cloud-provider:,max-pods:,profile:,region:,node-group:,target-image:,seed-image:,seed-user:,vpc-id:,public-subnet-id:,public-sg-id:,private-subnet-id:,private-sg-id:,transport:,ssh-private-key:,cni-version:,cni-plugin-version:,kubernetes-version:,max-nodes-total:,cores-total:,memory-total:,max-autoprovisioned-node-group-count:,scale-down-enabled:,scale-down-delay-after-add:,scale-down-delay-after-delete:,scale-down-delay-after-failure:,scale-down-unneeded-time:,scale-down-unready-time:,unremovable-node-recheck-timeout: -n "$0" -- "$@")
+TEMP=$(getopt -o p:r:k:n:p:s:t: --long arch:,cloud-provider:,max-pods:,profile:,region:,node-group:,target-image:,seed-image:,seed-user:,vpc-id:,public-subnet-id:,public-sg-id:,private-subnet-id:,private-sg-id:,transport:,ssh-private-key:,cni-version:,cni-plugin-version:,kubernetes-version:,max-nodes-total:,cores-total:,memory-total:,max-autoprovisioned-node-group-count:,scale-down-enabled:,scale-down-delay-after-add:,scale-down-delay-after-delete:,scale-down-delay-after-failure:,scale-down-unneeded-time:,scale-down-unready-time:,unremovable-node-recheck-timeout: -n "$0" -- "$@")
 
 eval set -- "${TEMP}"
 
@@ -109,7 +113,7 @@ while true; do
         shift 2
         ;;
 
-    --seed-arch)
+    --arch)
         SEED_ARCH=$2
         shift 2
         ;;
@@ -224,6 +228,111 @@ while true; do
         ;;
     esac
 done
+
+if [ "$SEED_ARCH" == "amd64" ]; then
+    export SEED_IMAGE=$SEED_IMAGE_AMD64
+    export DEFAULT_MACHINE="t3a.medium"
+    export MACHINES_TYPES=$(cat<<EOF
+    {
+        "t3a.nano": {
+            "price": 0.0051,
+            "memsize": 512,
+            "vcpus": 2,
+            "disksize": 10
+        },
+        "t3a.micro": {
+            "price": 0.0102,
+            "memsize": 1024,
+            "vcpus": 2,
+            "disksize": 10
+        },
+        "t3a.small": {
+            "price": 0.0204,
+            "memsize": 2048,
+            "vcpus": 2,
+            "disksize": 10
+        },
+        "t3a.medium": {
+            "price": 0.0408,
+            "memsize": 4096,
+            "vcpus": 2,
+            "disksize": 10
+        },
+        "t3a.large": {
+            "price": 0.0816,
+            "memsize": 8192,
+            "vcpus": 2,
+            "disksize": 10
+        },
+        "t3a.xlarge": {
+            "price": 0.1632,
+            "memsize": 16384,
+            "vcpus": 4,
+            "disksize": 10
+        },
+        "t3a.2xlarge": {
+            "price": 0.3264,
+            "memsize": 32768,
+            "vcpus": 8,
+            "disksize": 10
+        }
+    }
+EOF
+    )
+elif [ "$SEED_ARCH" == "arm64" ]; then
+    export SEED_IMAGE=$SEED_IMAGE_ARM64
+    export DEFAULT_MACHINE="t4g.medium"
+    export MACHINES_TYPES=$(cat<<EOF
+    {
+        "t4g.nano": {
+            "price": 0.0046,
+            "memsize": 512,
+            "vcpus": 2,
+            "disksize": 10
+        },
+        "t4g.micro": {
+            "price": 0.096,
+            "memsize": 1024,
+            "vcpus": 2,
+            "disksize": 10
+        },
+        "t4g.small": {
+            "price": 0.0184,
+            "memsize": 2048,
+            "vcpus": 2,
+            "disksize": 10
+        },
+        "t4g.medium": {
+            "price": 0.0368,
+            "memsize": 4096,
+            "vcpus": 2,
+            "disksize": 10
+        },
+        "t4g.large": {
+            "price": 0.0736,
+            "memsize": 8192,
+            "vcpus": 2,
+            "disksize": 10
+        },
+        "t4g.xlarge": {
+            "price": 0.1472,
+            "memsize": 16384,
+            "vcpus": 4,
+            "disksize": 10
+        },
+        "t4g.2xlarge": {
+            "price": 0.2944,
+            "memsize": 32768,
+            "vcpus": 8,
+            "disksize": 10
+        }
+    }
+EOF
+    )
+else
+    echo "Unsupported architecture: $SEED_ARCH"
+    exit -1
+fi
 
 pushd ${CURDIR}/../
 
@@ -593,50 +702,7 @@ AUTOSCALER_CONFIG=$(cat <<EOF
         ]
     },
     "default-machine": "${DEFAULT_MACHINE}",
-    "machines": {
-        "t3a.nano": {
-            "price": 0.0051,
-            "memsize": 512,
-            "vcpus": 2,
-            "disksize": 10
-        },
-        "t3a.micro": {
-            "price": 0.0102,
-            "memsize": 1024,
-            "vcpus": 2,
-            "disksize": 10
-        },
-        "t3a.small": {
-            "price": 0.0204,
-            "memsize": 2048,
-            "vcpus": 2,
-            "disksize": 10
-        },
-        "t3a.medium": {
-            "price": 0.0408,
-            "memsize": 4096,
-            "vcpus": 2,
-            "disksize": 10
-        },
-        "t3a.large": {
-            "price": 0.0816,
-            "memsize": 8192,
-            "vcpus": 2,
-            "disksize": 10
-        },
-        "t3a.xlarge": {
-            "price": 0.1632,
-            "memsize": 16384,
-            "vcpus": 4,
-            "disksize": 10
-        },
-        "t3a.2xlarge": {
-            "price": 0.3264,
-            "memsize": 32768,
-            "vcpus": 8,
-            "disksize": 10
-        }
-    },
+    "machines": ${MACHINES_TYPES},
     "sync-folder": {
     },
     "ssh-infos" : {
@@ -676,6 +742,8 @@ AUTOSCALER_CONFIG=$(cat <<EOF
 }
 EOF
 )
+
+echo $AUTOSCALER_CONFIG
 
 echo "${AUTOSCALER_CONFIG}" | jq . > config/kubernetes-aws-autoscaler.json
 
