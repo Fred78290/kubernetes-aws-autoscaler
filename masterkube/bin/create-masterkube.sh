@@ -485,7 +485,6 @@ if [ -z "${TARGET_IMAGE_AMI}" ]; then
         --arch="${SEED_ARCH}" \
         --ami="${SEED_IMAGE}" \
         --user="${SEED_USER}" \
-        --ssh-key="${SSH_KEY}" \
         --ssh-key-name="${SSH_KEYNAME}" \
         --subnet-id="${VPC_MASTER_SUBNET_ID}" \
         --sg-id="${VPC_MASTER_SECURITY_GROUPID}" \
