@@ -6,7 +6,6 @@ KUBERNETES_VERSION=$(curl -sSL https://dl.k8s.io/release/stable.txt)
 CNI_VERSION=v0.6.0
 CNI_PLUGIN_VERSION=v0.9.1
 CNI_PLUGIN=aws
-SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
 CACHE=~/.local/aws/cache
 OSDISTRO=$(uname -s)
 SSH_KEYNAME="aws-k8s-key"
@@ -54,7 +53,7 @@ function get_ecs_container_account_for_region () {
 
 mkdir -p $CACHE
 
-TEMP=`getopt -o fc:i:k:n:op:s:u:v: --long arch:,ecr-password:,force,profile:,region:,subnet-id:,sg-id:,use-public-ip:,user:,ami:,custom-image:,ssh-key:,ssh-key-name:,cni-plugin:,cni-version:,cni-plugin-version:,kubernetes-version: -n "$0" -- "$@"`
+TEMP=`getopt -o fc:i:n:op:s:u:v: --long arch:,ecr-password:,force,profile:,region:,subnet-id:,sg-id:,use-public-ip:,user:,ami:,custom-image:,ssh-key-name:,cni-plugin:,cni-version:,cni-plugin-version:,kubernetes-version: -n "$0" -- "$@"`
 eval set -- "$TEMP"
 
 # extract options and their arguments into variables.
@@ -66,7 +65,6 @@ while true ; do
         -p|--profile) AWS_PROFILE="${2}" ; shift 2;;
         -r|--region) AWS_REGION="${2}" ; shift 2;;
         -i|--custom-image) TARGET_IMAGE="$2" ; shift 2;;
-        -k|--ssh-key) SSH_KEY=$2 ; shift 2;;
         -i|--cni-version) CNI_VERSION=$2 ; shift 2;;
         -i|--cni-plugin-version) CNI_PLUGIN_VERSION=$2 ; shift 2;;
         -c|--cni-plugin) CNI_PLUGIN=$2 ; shift 2;;

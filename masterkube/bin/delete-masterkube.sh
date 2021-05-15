@@ -4,6 +4,9 @@ CURDIR=$(dirname $0)
 NODEGROUP_NAME="aws-ca-k8s"
 MASTERKUBE=${NODEGROUP_NAME}-masterkube
 
+# import hidded definitions
+source ${CURDIR}/aws.defs
+
 echo "Delete masterkube previous instance"
 
 pushd $CURDIR/../

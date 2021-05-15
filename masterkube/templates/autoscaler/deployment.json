@@ -73,13 +73,17 @@
                                 "mountPath": "/var/run/cluster-autoscaler"
                             },
                             {
-                                "name": "cluster-autoscaler",
+                                "name": "config-cluster-autoscaler",
                                 "mountPath": "/etc/cluster"
+                            },
+                            {
+                                "name": "autoscaler-ssh-keys",
+                                "mountPath": "/root/.ssh"
                             }
                         ]
                     },
                     {
-                        "image": "$REGISTRY/cluster-autoscaler:v1.21.0",
+                        "image": "$REGISTRY/cluster-autoscaler:v1.20.5",
                         "name": "cluster-autoscaler",
                         "resources": {
                             "limits": {
@@ -123,7 +127,7 @@
                                 "readOnly": true
                             },
                             {
-                                "name": "cluster-autoscaler",
+                                "name": "config-cluster-autoscaler",
                                 "mountPath": "/etc/cluster",
                                 "readOnly": true
                             }
@@ -137,15 +141,22 @@
                         }
                     },
                     {
-                        "name": "cluster-autoscaler",
-                        "hostPath": {
-                            "path": "/etc/cluster"
+                        "name": "config-cluster-autoscaler",
+                        "configMap": {
+                            "name": "config-cluster-autoscaler"
                         }
                     },
                     {
                         "name": "ssl-certs",
                         "hostPath": {
                             "path": "/etc/ssl/certs/ca-certificates.crt"
+                        }
+                    },
+                    {
+                        "name": "autoscaler-ssh-keys",
+                        "secret": {
+                            "secretName": "autoscaler-ssh-keys",
+                            "defaultMode": 384
                         }
                     }
                 ]
