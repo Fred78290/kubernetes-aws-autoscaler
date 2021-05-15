@@ -14,7 +14,7 @@ export NODEGROUP_NAME="aws-ca-k8s"
 export MASTERKUBE="${NODEGROUP_NAME}-masterkube"
 export PROVIDERID="${SCHEME}://${NODEGROUP_NAME}/object?type=node&name=${MASTERKUBE}"
 export SSH_PRIVATE_KEY=~/.ssh/id_rsa
-export SSH_KEY=$(cat "${SSH_PRIVATE_KEY}.pub")
+export SSH_PUBLIC_KEY="${SSH_PRIVATE_KEY}.pub"
 export KUBERNETES_VERSION=v1.21.0
 export KUBECONFIG=${HOME}/.kube/config
 export ROOT_IMG_NAME=focal-kubernetes
@@ -393,21 +393,20 @@ TARGET_IMAGE="${ROOT_IMG_NAME}-cni-${CNI_PLUGIN}-${KUBERNETES_VERSION}-${SEED_AR
 KEYEXISTS=$(aws ec2 describe-key-pairs --profile ${AWS_PROFILE} --region ${AWS_REGION} --key-names "${SSH_KEYNAME}" | jq  '.KeyPairs[].KeyName' | tr -d '"')
 ECR_PASSWORD=$(aws ecr get-login-password  --profile ${AWS_PROFILE} --region us-west-2)
 
+SSH_KEY_FNAME=$(basename ${SSH_PRIVATE_KEY})
+SSH_PUBLIC_KEY="${SSH_PRIVATE_KEY}.pub"
+
 if [ -z ${KEYEXISTS} ]; then
     echo "SSH Public key doesn't exist"
-    if [ ! -f ${SSH_KEY_PUB} ]; then
-        echo "${SSH_KEY_PUB} doesn't exists. FATAL"
+    if [ ! -f ${SSH_PUBLIC_KEY} ]; then
+        echo "${SSH_PUBLIC_KEY} doesn't exists. FATAL"
 
         exit -1
     fi
-    aws ec2 import-key-pair --profile ${AWS_PROFILE} --region ${AWS_REGION} --key-name ${SSH_KEYNAME} --public-key-material "file://${SSH_KEY_PUB}"
+    aws ec2 import-key-pair --profile ${AWS_PROFILE} --region ${AWS_REGION} --key-name ${SSH_KEYNAME} --public-key-material "file://${SSH_PUBLIC_KEY}"
 else
     echo "SSH Public key already exists"
 fi
-
-export SSH_KEY_FNAME=$(basename ${SSH_PRIVATE_KEY})
-export SSH_KEY_PUB="${SSH_PRIVATE_KEY}.pub"
-export SSH_KEY=$(cat "${SSH_KEY_PUB}")
 
 # GRPC network endpoint
 if [ "${LAUNCH_CA}" != "YES" ]; then
@@ -432,7 +431,7 @@ if [ "${LAUNCH_CA}" != "YES" ]; then
         exit -1
     fi
 else
-    SSH_PRIVATE_KEY_LOCAL="/etc/cluster/${SSH_KEY_FNAME}"
+    SSH_PRIVATE_KEY_LOCAL="/root/.ssh/id_rsa"
     TRANSPORT=unix
     LISTEN="/var/run/cluster-autoscaler/aws.sock"
     CONNECTTO="unix:/var/run/cluster-autoscaler/aws.sock"
@@ -485,7 +484,6 @@ if [ -z "${TARGET_IMAGE_AMI}" ]; then
         --arch="${SEED_ARCH}" \
         --ami="${SEED_IMAGE}" \
         --user="${SEED_USER}" \
-        --ssh-key="${SSH_KEY}" \
         --ssh-key-name="${SSH_KEYNAME}" \
         --subnet-id="${VPC_MASTER_SUBNET_ID}" \
         --sg-id="${VPC_MASTER_SECURITY_GROUPID}" \
@@ -664,6 +662,7 @@ TOKEN=$(cat ./cluster/token)
 CACERT=$(cat ./cluster/ca.cert)
 
 kubectl create secret tls kube-system -n kube-system --key ./etc/ssl/privkey.pem --cert ./etc/ssl/fullchain.pem --kubeconfig=./cluster/config
+kubectl create secret generic autoscaler-ssh-keys -n kube-system --from-file=id_rsa="${SSH_PRIVATE_KEY}" --from-file=id_rsa.pub="${SSH_PUBLIC_KEY}" --kubeconfig=./cluster/config
 
 kubeconfig-merge.sh ${MASTERKUBE} ./cluster/config
 
@@ -743,13 +742,12 @@ AUTOSCALER_CONFIG=$(cat <<EOF
 EOF
 )
 
-echo $AUTOSCALER_CONFIG
-
 echo "${AUTOSCALER_CONFIG}" | jq . > config/kubernetes-aws-autoscaler.json
 
 # Recopy config file on master node
-scp ${SSH_OPTIONS} ${SSH_PRIVATE_KEY} ./config/grpc-config.json ./config/kubernetes-aws-autoscaler.json ${SEED_USER}@${IPADDR}:/tmp
-ssh ${SSH_OPTIONS} ${SEED_USER}@${IPADDR} sudo cp "/tmp/${SSH_KEY_FNAME}" /tmp/grpc-config.json /tmp/kubernetes-aws-autoscaler.json /etc/cluster
+kubectl create configmap config-cluster-autoscaler --kubeconfig=./cluster/config -n kube-system \
+	--from-file ./config/grpc-config.json \
+	--from-file ./config/kubernetes-aws-autoscaler.json
 
 # Create Pods
 create-ingress-controller.sh
@@ -760,5 +758,11 @@ create-helloworld.sh
 if [ "${LAUNCH_CA}" != "NO" ]; then
     create-autoscaler.sh ${LAUNCH_CA}
 fi
+
+# Add cluster config in configmap
+kubectl create configmap masterkube-config --kubeconfig=./cluster/config -n kube-system \
+	--from-file ./cluster/ca.cert \
+    --from-file ./cluster/dashboard-token \
+    --from-file ./cluster/token
 
 popd
