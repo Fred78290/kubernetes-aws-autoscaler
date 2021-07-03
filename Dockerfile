@@ -23,7 +23,7 @@ COPY out .
 
 RUN mv /$TARGETPLATFORM/aws-autoscaler /aws-autoscaler
 
-FROM ubuntu:focal
+FROM ubuntu:20.10
 
 LABEL maintainer="Frederic Boltz <frederic.boltz@gmail.com>"
 
