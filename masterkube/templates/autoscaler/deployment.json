@@ -63,7 +63,7 @@
                         "command": [
                             "/usr/local/bin/aws-autoscaler",
                             "--config=/etc/cluster/kubernetes-aws-autoscaler.json",
-                            "--save=/etc/cluster/aws-autoscaler-state.json",
+                            "--save=/var/run/cluster-autoscaler/aws-autoscaler-state.json",
                             "--log-level=info"
                         ],
                         "imagePullPolicy": "Always",
