@@ -125,8 +125,9 @@ if [ -z ${KEYEXISTS} ]; then
 fi
 
 KUBERNETES_MINOR_RELEASE=$(echo -n $KUBERNETES_VERSION | tr '.' ' ' | awk '{ print $2 }')
+CRIO_VERSION=$(echo -n $KUBERNETES_VERSION | tr -d 'v' | tr '.' ' ' | awk '{ print $1"."$2 }')
 
-echo "Prepare ${TARGET_IMAGE} image"
+echo "Prepare ${TARGET_IMAGE} image with cri-o version: $CRIO_VERSION and kubernetes: $KUBERNETES_VERSION"
 
 cat > $CACHE/mapping.json <<EOF
 [
@@ -151,30 +152,78 @@ CNI_PLUGIN_VERSION=${CNI_PLUGIN_VERSION}
 KUBERNETES_VERSION=${KUBERNETES_VERSION}
 KUBERNETES_MINOR_RELEASE=${KUBERNETES_MINOR_RELEASE}
 ECR_PASSWORD=${ECR_PASSWORD}
-ECR_ACCOUNT=$ECR_ACCOUNT
+ECR_ACCOUNT=${ECR_ACCOUNT}
+CRIO_VERSION=${CRIO_VERSION}
 EOF
 
 cat >> "${CACHE}/prepare-image.sh" <<"EOF"
 
 function pull_image() {
     DOCKER_IMAGES=$(curl -s $1 | grep "image: " | sed -E 's/.+image: (.+)/\1/g')
-
+    
     for DOCKER_IMAGE in $DOCKER_IMAGES
     do
         echo "Pull image $DOCKER_IMAGE"
-        docker pull $DOCKER_IMAGE
+        podman pull $DOCKER_IMAGE
     done
 }
 
+mkdir -p /opt/cni/bin
+mkdir -p /usr/local/bin
+
+echo "Prepare to install CRI-O"
+
+cat <<SHELL > /etc/modules-load.d/crio.conf
+overlay
+br_netfilter
+SHELL
+
+modprobe overlay
+modprobe br_netfilter
+
+cat <<SHELL >> /etc/sysctl.d/kubernetes.conf
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-arptables = 1
+net.ipv4.ip_forward = 1
+SHELL
+
+echo '1' > /proc/sys/net/bridge/bridge-nf-call-iptables
+
+sysctl --system
+
+. /etc/os-release
+
+OS=x${NAME}_${VERSION_ID}
+
+cat > /etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list <<SHELL
+deb https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$OS/ /
+SHELL
+
+cat > /etc/apt/sources.list.d/devel:kubic:libcontainers:stable:cri-o:$CRIO_VERSION.list <<SHELL
+deb http://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/$CRIO_VERSION/$OS/ /
+SHELL
+
+curl -s -L https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$OS/Release.key | sudo apt-key --keyring /etc/apt/trusted.gpg.d/libcontainers.gpg add -
+curl -s -L https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable:cri-o:$CRIO_VERSION/$OS/Release.key | sudo apt-key --keyring /etc/apt/trusted.gpg.d/libcontainers-cri-o.gpg add -
+
 apt-get update
-apt-get upgrade -y
+apt-get dist-upgrade -y
 apt-get autoremove -y
-apt-get install jq socat conntrack awscli curl -y
+apt-get install jq socat conntrack awscli curl net-tools traceroute podman cri-o cri-o-runc -y
 
 systemctl disable apparmor
 
-mkdir -p /opt/cni/bin
-mkdir -p /usr/local/bin
+mkdir -p /etc/crio/crio.conf.d/
+
+cat > /etc/crio/crio.conf.d/02-cgroup-manager.conf <<SHELL
+conmon_cgroup = "pod"
+cgroup_manager = "cgroupfs"
+SHELL
+
+systemctl daemon-reload
+systemctl enable crio
+systemctl restart crio
 
 # Set NTP server
 echo "set NTP server"
@@ -197,49 +246,6 @@ if [ $CNI_PLUGIN = "aws" ]; then
     sudo systemctl enable iptables-restore
 fi
 
-echo "Prepare to install Docker"
-
-# Setup daemon.
-mkdir -p /etc/docker
-mkdir -p /etc/systemd/system/docker.service.d
-
-curl https://get.docker.com | bash
-
-if [ $KUBERNETES_MINOR_RELEASE -ge 14 ] && [ $CNI_PLUGIN != "aws" ] ; then
-    cat > /etc/docker/daemon.json <<SHELL
-    {
-        "exec-opts": [
-            "native.cgroupdriver=systemd"
-        ],
-        "log-driver": "json-file",
-        "log-opts": {
-            "max-size": "100m"
-        },
-        "storage-driver": "overlay2"
-    }
-SHELL
-elif [ $CNI_PLUGIN = "aws" ]; then        
-    cat > /etc/docker/daemon.json <<SHELL
-    {
-        "exec-opts": [
-            "native.cgroupdriver=systemd"
-        ],
-        "bridge": "none",
-        "log-driver": "json-file",
-        "log-opts": {
-            "max-size": "10m",
-            "max-file": "10"
-        },
-        "live-restore": true,
-        "max-concurrent-downloads": 10
-    }
-SHELL
-fi
-
-# Restart docker.
-systemctl daemon-reload
-systemctl restart docker
-
 echo "Prepare to install CNI plugins"
 
 case $CNI_PLUGIN_VERSION in
@@ -258,14 +264,15 @@ cd /usr/local/bin
 curl -L --remote-name-all https://storage.googleapis.com/kubernetes-release/release/${KUBERNETES_VERSION}/bin/linux/${SEED_ARCH}/{kubeadm,kubelet,kubectl,kube-proxy}
 chmod +x /usr/local/bin/kube*
 
+curl -L https://github.com/kubernetes-sigs/cri-tools/releases/download/v${CRIO_VERSION}.0/crictl-v${CRIO_VERSION}.0-linux-${SEED_ARCH}.tar.gz  | tar -C /usr/local/bin -xz
+chmod +x /usr/local/bin/crictl
+
 mkdir -p /etc/systemd/system/kubelet.service.d
 
 cat > /etc/systemd/system/kubelet.service <<SHELL
 [Unit]
 Description=kubelet: The Kubernetes Node Agent
 Documentation=http://kubernetes.io/docs/
-After=docker.service
-Requires=docker.service
 
 [Service]
 ExecStart=/usr/local/bin/kubelet
@@ -318,22 +325,10 @@ echo 'export PATH=/opt/cni/bin:$PATH' >> /etc/profile.d/apps-bin-path.sh
 systemctl enable kubelet
 systemctl restart kubelet
 
-usermod -aG docker ubuntu
-
-if [ "$CNI_PLUGIN" != "aws" ]; then
-    modprobe br_netfilter
-
-    echo "net.bridge.bridge-nf-call-ip6tables = 1" >> /etc/sysctl.conf
-    echo "net.bridge.bridge-nf-call-iptables = 1" >> /etc/sysctl.conf
-    echo "net.bridge.bridge-nf-call-arptables = 1" >> /etc/sysctl.conf
-
-    echo "br_netfilter" >> /etc/modules
-fi
-
 /usr/local/bin/kubeadm config images pull --kubernetes-version=${KUBERNETES_VERSION}
 
 if [ "$CNI_PLUGIN" = "aws" ]; then
-    docker login -u AWS -p "$ECR_PASSWORD" "602401143452.dkr.ecr.us-west-2.amazonaws.com"
+    podman login -u AWS -p "$ECR_PASSWORD" "602401143452.dkr.ecr.us-west-2.amazonaws.com"
     pull_image https://raw.githubusercontent.com/aws/amazon-vpc-cni-k8s/v1.7.10/config/v1.7/aws-k8s-cni.yaml
 elif [ "$CNI_PLUGIN" = "calico" ]; then
     pull_image https://docs.projectcalico.org/manifests/calico-vxlan.yaml
@@ -354,8 +349,18 @@ fi
 [ -f /etc/cloud/cloud.cfg.d/50-curtin-networking.cfg ] && rm /etc/cloud/cloud.cfg.d/50-curtin-networking.cfg
 rm /etc/netplan/*
 cloud-init clean
-rm /var/log/cloud-ini*
-rm /var/log/syslog
+
+rm -rf /etc/apparmor.d/cache/* /etc/apparmor.d/cache/.features
+/usr/bin/truncate --size 0 /etc/machine-id
+rm -f /snap/README
+find /usr/share/netplan -name __pycache__ -exec rm -r {} +
+rm -rf /var/cache/pollinate/seeded /var/cache/snapd/* /var/cache/motd-news
+rm -rf /var/lib/cloud /var/lib/dbus/machine-id /var/lib/private /var/lib/systemd/timers /var/lib/systemd/timesync /var/lib/systemd/random-seed
+rm -f /var/lib/ubuntu-release-upgrader/release-upgrade-available
+rm -f /var/lib/update-notifier/fsck-at-reboot /var/lib/update-notifier/hwe-eol
+find /var/log -type f -exec rm -f {} +
+rm -r /tmp/* /tmp/.*-unix /var/tmp/*
+/bin/sync
 EOF
 
 chmod +x "${CACHE}/prepare-image.sh"
