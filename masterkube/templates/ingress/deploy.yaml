@@ -20,7 +20,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: controller
   name: ingress-nginx
-  namespace: ingress-nginx
+  namespace: __K8NAMESPACE__
 automountServiceAccountToken: true
 ---
 # Source: ingress-nginx/templates/controller-configmap.yaml
@@ -35,7 +35,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: controller
   name: ingress-nginx-controller
-  namespace: ingress-nginx
+  namespace: __K8NAMESPACE__
 data:
 ---
 # Source: ingress-nginx/templates/clusterrole.yaml
@@ -125,7 +125,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: ingress-nginx
-    namespace: ingress-nginx
+    namespace: __K8NAMESPACE__
 ---
 # Source: ingress-nginx/templates/controller-role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -139,7 +139,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: controller
   name: ingress-nginx
-  namespace: ingress-nginx
+  namespace: __K8NAMESPACE__
 rules:
   - apiGroups:
       - ''
@@ -225,7 +225,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: controller
   name: ingress-nginx
-  namespace: ingress-nginx
+  namespace: __K8NAMESPACE__
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -233,7 +233,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: ingress-nginx
-    namespace: ingress-nginx
+    namespace: __K8NAMESPACE__
 ---
 # Source: ingress-nginx/templates/controller-service-webhook.yaml
 apiVersion: v1
@@ -247,7 +247,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: controller
   name: ingress-nginx-controller-admission
-  namespace: ingress-nginx
+  namespace: __K8NAMESPACE__
 spec:
   type: ClusterIP
   ports:
@@ -272,9 +272,9 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: controller
   name: ingress-nginx-controller
-  namespace: ingress-nginx
+  namespace: __K8NAMESPACE__
 spec:
-  type: NodePort
+  type: LoadBalancer
   ports:
     - name: http
       port: 80
@@ -301,7 +301,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: controller
   name: ingress-nginx-controller
-  namespace: ingress-nginx
+  namespace: __K8NAMESPACE__
 spec:
   selector:
     matchLabels:
@@ -317,7 +317,6 @@ spec:
         app.kubernetes.io/instance: ingress-nginx
         app.kubernetes.io/component: controller
     spec:
-      hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       containers:
         - 
@@ -416,6 +415,7 @@ spec:
               memory: 90Mi
       nodeSelector:
         kubernetes.io/os: linux
+        master: "true"
       serviceAccountName: ingress-nginx
       terminationGracePeriodSeconds: 300
       volumes:
@@ -462,7 +462,7 @@ webhooks:
       - v1beta1
     clientConfig:
       service:
-        namespace: ingress-nginx
+        namespace: __K8NAMESPACE__
         name: ingress-nginx-controller-admission
         path: /networking/v1beta1/ingresses
 ---
@@ -481,7 +481,7 @@ metadata:
     app.kubernetes.io/version: 0.45.0
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: admission-webhook
-  namespace: ingress-nginx
+  namespace: __K8NAMESPACE__
 ---
 # Source: ingress-nginx/templates/admission-webhooks/job-patch/clusterrole.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -529,7 +529,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: ingress-nginx-admission
-    namespace: ingress-nginx
+    namespace: __K8NAMESPACE__
 ---
 # Source: ingress-nginx/templates/admission-webhooks/job-patch/role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -546,7 +546,7 @@ metadata:
     app.kubernetes.io/version: 0.45.0
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: admission-webhook
-  namespace: ingress-nginx
+  namespace: __K8NAMESPACE__
 rules:
   - apiGroups:
       - ''
@@ -571,7 +571,7 @@ metadata:
     app.kubernetes.io/version: 0.45.0
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: admission-webhook
-  namespace: ingress-nginx
+  namespace: __K8NAMESPACE__
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -579,7 +579,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: ingress-nginx-admission
-    namespace: ingress-nginx
+    namespace: __K8NAMESPACE__
 ---
 # Source: ingress-nginx/templates/admission-webhooks/job-patch/job-createSecret.yaml
 apiVersion: batch/v1
@@ -596,7 +596,7 @@ metadata:
     app.kubernetes.io/version: 0.45.0
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: admission-webhook
-  namespace: ingress-nginx
+  namespace: __K8NAMESPACE__
 spec:
   template:
     metadata:
@@ -644,7 +644,7 @@ metadata:
     app.kubernetes.io/version: 0.45.0
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: admission-webhook
-  namespace: ingress-nginx
+  namespace: __K8NAMESPACE__
 spec:
   template:
     metadata:
@@ -692,13 +692,13 @@ kind: ConfigMap
 apiVersion: v1
 metadata:
   name: masterkube-tcp-services
-  namespace: ingress-nginx
+  namespace: __K8NAMESPACE__
 ---
 kind: ConfigMap
 apiVersion: v1
 metadata:
   name: masterkube-udp-services
-  namespace: ingress-nginx
+  namespace: __K8NAMESPACE__
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -706,7 +706,7 @@ metadata:
   name: masterkube-default-http-backend
   labels:
     app: default-http-backend
-  namespace: ingress-nginx
+  namespace: __K8NAMESPACE__
 spec:
   replicas: 1
   selector:
@@ -746,7 +746,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: masterkube-default-http-backend
-  namespace: ingress-nginx
+  namespace: __K8NAMESPACE__
   labels:
     app: masterkube-default-http-backend
 spec:
