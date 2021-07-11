@@ -74,6 +74,10 @@
                             {
                                 "name": "config-cluster-autoscaler",
                                 "mountPath": "/etc/cluster"
+                            },
+                            {
+                                "name": "autoscaler-ssh-keys",
+                                "mountPath": "/root/.ssh"
                             }
                         ]
                     }
