@@ -196,6 +196,22 @@ sysctl --system
 
 OS=x${NAME}_${VERSION_ID}
 
+echo "==============================================================================================================================="
+echo "= Upgrade ubuntu distro"
+echo "==============================================================================================================================="
+apt update
+apt dist-upgrade -y
+echo
+
+echo "==============================================================================================================================="
+echo "= Install mandatories packages"
+echo "==============================================================================================================================="
+apt install jq socat conntrack awscli net-tools traceroute -y
+echo
+
+echo "==============================================================================================================================="
+echo "Install CRI-O repositories"
+echo "==============================================================================================================================="
 cat > /etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list <<SHELL
 deb https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$OS/ /
 SHELL
@@ -207,10 +223,15 @@ SHELL
 curl -s -L https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$OS/Release.key | sudo apt-key --keyring /etc/apt/trusted.gpg.d/libcontainers.gpg add -
 curl -s -L https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable:cri-o:$CRIO_VERSION/$OS/Release.key | sudo apt-key --keyring /etc/apt/trusted.gpg.d/libcontainers-cri-o.gpg add -
 
-apt-get update
-apt-get dist-upgrade -y
+apt update
+apt install podman cri-o cri-o-runc -y
+echo
+
+echo "==============================================================================================================================="
+echo "= Clean ubuntu distro"
+echo "==============================================================================================================================="
 apt-get autoremove -y
-apt-get install jq socat conntrack awscli curl net-tools traceroute podman cri-o cri-o-runc -y
+echo
 
 systemctl disable apparmor
 
@@ -224,6 +245,8 @@ SHELL
 systemctl daemon-reload
 systemctl enable crio
 systemctl restart crio
+
+echo
 
 # Set NTP server
 echo "set NTP server"
@@ -257,17 +280,37 @@ case $CNI_PLUGIN_VERSION in
     ;;
 esac
 
+echo "==============================================================================================================================="
+echo "= Install CNI plugins"
+echo "==============================================================================================================================="
+
 curl -L "${URL_PLUGINS}" | tar -C /opt/cni/bin -xz
 curl -L "https://github.com/containernetworking/cni/releases/download/${CNI_VERSION}/cni-${SEED_ARCH}-${CNI_VERSION}.tgz" | tar -C /opt/cni/bin -xz
+
+echo
+
+echo "==============================================================================================================================="
+echo "= Install kubernetes binaries"
+echo "==============================================================================================================================="
 
 cd /usr/local/bin
 curl -L --remote-name-all https://storage.googleapis.com/kubernetes-release/release/${KUBERNETES_VERSION}/bin/linux/${SEED_ARCH}/{kubeadm,kubelet,kubectl,kube-proxy}
 chmod +x /usr/local/bin/kube*
 
+echo "==============================================================================================================================="
+echo "= Install crictl"
+echo "==============================================================================================================================="
 curl -L https://github.com/kubernetes-sigs/cri-tools/releases/download/v${CRIO_VERSION}.0/crictl-v${CRIO_VERSION}.0-linux-${SEED_ARCH}.tar.gz  | tar -C /usr/local/bin -xz
 chmod +x /usr/local/bin/crictl
 
+echo
+
+echo "==============================================================================================================================="
+echo "= Configure kubelet"
+echo "==============================================================================================================================="
+
 mkdir -p /etc/systemd/system/kubelet.service.d
+mkdir -p /var/lib/kubelet
 
 cat > /etc/systemd/system/kubelet.service <<SHELL
 [Unit]
@@ -317,15 +360,28 @@ SHELL
 fi
 
 echo 'KUBELET_EXTRA_ARGS="--network-plugin=cni"' > /etc/default/kubelet
+echo 'KUBELET_KUBEADM_ARGS="--container-runtime=remote --container-runtime-endpoint=/var/run/crio/crio.sock' > /var/lib/kubelet/kubeadm-flags.env
 
 #echo 'KUBELET_EXTRA_ARGS="--network-plugin=cni --fail-swap-on=false --read-only-port=10255"' > /etc/default/kubelet
 
 echo 'export PATH=/opt/cni/bin:$PATH' >> /etc/profile.d/apps-bin-path.sh
 
+echo "==============================================================================================================================="
+echo "= Restart kubelet"
+echo "==============================================================================================================================="
+
 systemctl enable kubelet
 systemctl restart kubelet
 
+echo "==============================================================================================================================="
+echo "= Pull kube images"
+echo "==============================================================================================================================="
+
 /usr/local/bin/kubeadm config images pull --kubernetes-version=${KUBERNETES_VERSION}
+
+echo "==============================================================================================================================="
+echo "= Pull cni image"
+echo "==============================================================================================================================="
 
 if [ "$CNI_PLUGIN" = "aws" ]; then
     podman login -u AWS -p "$ECR_PASSWORD" "602401143452.dkr.ecr.us-west-2.amazonaws.com"
@@ -345,6 +401,10 @@ elif [ "$CNI_PLUGIN" = "kube" ]; then
 elif [ "$CNI_PLUGIN" = "romana" ]; then
     pull_image https://raw.githubusercontent.com/romana/romana/master/containerize/specs/romana-kubeadm.yml
 fi
+
+echo "==============================================================================================================================="
+echo "= Cleanup"
+echo "==============================================================================================================================="
 
 [ -f /etc/cloud/cloud.cfg.d/50-curtin-networking.cfg ] && rm /etc/cloud/cloud.cfg.d/50-curtin-networking.cfg
 rm /etc/netplan/*
