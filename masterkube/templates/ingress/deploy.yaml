@@ -274,7 +274,7 @@ metadata:
   name: ingress-nginx-controller
   namespace: __K8NAMESPACE__
 spec:
-  type: LoadBalancer
+  type: NodePort
   ports:
     - name: http
       port: 80
@@ -317,6 +317,7 @@ spec:
         app.kubernetes.io/instance: ingress-nginx
         app.kubernetes.io/component: controller
     spec:
+      hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       containers:
         - 
