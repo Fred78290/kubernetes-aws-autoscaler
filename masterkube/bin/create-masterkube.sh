@@ -657,6 +657,13 @@ fi
 
 sudo bash -c "echo '${IPADDR} ${MASTERKUBE}.${DOMAIN_NAME} masterkube-aws.${DOMAIN_NAME} masterkube-aws-dashboard.${DOMAIN_NAME}' >> /etc/hosts"
 
+# Register in godaddy
+gdip=$(curl -s -X GET -H "Authorization: sso-key ${GODADDY_API_KEY}:${GODADDY_API_SECRET}" "https://api.godaddy.com/v1/domains/${DOMAIN_NAME}/records/A/${MASTERKUBE}" | jq '.[0]|.data' | tr -d '"')
+
+if [ "$gdip" != "$IPADDR" -a "$IPADDR" != "" ]; then
+    curl -s -X PUT "https://api.godaddy.com/v1/domains/${DOMAIN_NAME}/records/A/${MASTERKUBE}" -H "Authorization: sso-key ${GODADDY_API_KEY}:${GODADDY_API_SECRET}" -H "Content-Type: application/json" -d "[{\"data\": \"${IPADDR}\"}]"
+fi
+
 MASTER_IP=$(cat ./cluster/manager-ip)
 TOKEN=$(cat ./cluster/token)
 CACERT=$(cat ./cluster/ca.cert)
