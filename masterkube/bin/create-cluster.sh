@@ -386,7 +386,9 @@ if [ "$CNI_PLUGIN" = "aws" ]; then
 
     echo "Install AWS network"
 
-    kubectl apply -f "https://raw.githubusercontent.com/aws/amazon-vpc-cni-k8s/v1.7.10/config/v1.7/aws-k8s-cni.yaml" 2>&1
+    curl -s https://raw.githubusercontent.com/aws/amazon-vpc-cni-k8s/v1.8.0/config/v1.8/aws-k8s-cni.yaml \
+      | sed -e 's/dockershim\.sock/crio\/crio.sock/g' -e 's/dockershim/cri/g' \
+      | kubectl apply -f - 2>&1
 
 elif [ "$CNI_PLUGIN" = "calico" ]; then
 

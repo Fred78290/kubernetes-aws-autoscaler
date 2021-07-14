@@ -385,7 +385,7 @@ echo "==========================================================================
 
 if [ "$CNI_PLUGIN" = "aws" ]; then
     podman login -u AWS -p "$ECR_PASSWORD" "602401143452.dkr.ecr.us-west-2.amazonaws.com"
-    pull_image https://raw.githubusercontent.com/aws/amazon-vpc-cni-k8s/v1.7.10/config/v1.7/aws-k8s-cni.yaml
+    pull_image https://raw.githubusercontent.com/aws/amazon-vpc-cni-k8s/v1.8.0/config/v1.8/aws-k8s-cni.yaml
 elif [ "$CNI_PLUGIN" = "calico" ]; then
     pull_image https://docs.projectcalico.org/manifests/calico-vxlan.yaml
 elif [ "$CNI_PLUGIN" = "flannel" ]; then
