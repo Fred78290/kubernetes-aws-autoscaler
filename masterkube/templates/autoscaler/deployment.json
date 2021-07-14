@@ -48,7 +48,7 @@
                 ],
                 "containers": [
                     {
-                        "image": "$REGISTRY/aws-autoscaler:v1.21.0",
+                        "image": "$REGISTRY/aws-autoscaler:v1.21.2",
                         "name": "aws-autoscaler",
                         "resources": {
                             "limits": {
@@ -63,7 +63,7 @@
                         "command": [
                             "/usr/local/bin/aws-autoscaler",
                             "--config=/etc/cluster/kubernetes-aws-autoscaler.json",
-                            "--save=/etc/cluster/aws-autoscaler-state.json",
+                            "--save=/var/run/cluster-autoscaler/aws-autoscaler-state.json",
                             "--log-level=info"
                         ],
                         "imagePullPolicy": "Always",
@@ -83,7 +83,7 @@
                         ]
                     },
                     {
-                        "image": "$REGISTRY/cluster-autoscaler:v1.20.5",
+                        "image": "$REGISTRY/cluster-autoscaler:v1.21.2",
                         "name": "cluster-autoscaler",
                         "resources": {
                             "limits": {

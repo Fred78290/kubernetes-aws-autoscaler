@@ -179,13 +179,15 @@ localAPIEndpoint:
   advertiseAddress: ${APISERVER_ADVERTISE_ADDRESS}
   bindPort: ${APISERVER_ADVERTISE_PORT}
 nodeRegistration:
-  criSocket: /var/run/dockershim.sock
+  criSocket: /var/run/crio/crio.sock
   name: ${NODENAME}
   taints:
   - effect: NoSchedule
     key: node-role.kubernetes.io/master
   kubeletExtraArgs:
     network-plugin: cni
+    container-runtime: remote
+    container-runtime-endpoint: /var/run/crio/crio.sock
     provider-id: ${PROVIDERID}
     cloud-provider: aws
 ---
@@ -274,13 +276,15 @@ localAPIEndpoint:
   advertiseAddress: ${APISERVER_ADVERTISE_ADDRESS}
   bindPort: ${APISERVER_ADVERTISE_PORT}
 nodeRegistration:
-  criSocket: /var/run/dockershim.sock
+  criSocket: /var/run/crio/crio.sock
   name: ${NODENAME}
   taints:
   - effect: NoSchedule
     key: node-role.kubernetes.io/master
   kubeletExtraArgs:
     network-plugin: cni
+    container-runtime: remote
+    container-runtime-endpoint: /var/run/crio/crio.sock
     provider-id: ${PROVIDERID}
 ---
 kind: KubeletConfiguration
