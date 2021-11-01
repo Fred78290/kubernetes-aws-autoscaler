@@ -224,7 +224,7 @@ curl -s -L https://download.opensuse.org/repositories/devel:/kubic:/libcontainer
 curl -s -L https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable:cri-o:$CRIO_VERSION/$OS/Release.key | sudo apt-key --keyring /etc/apt/trusted.gpg.d/libcontainers-cri-o.gpg add -
 
 apt update
-apt install podman cri-o cri-o-runc -y
+apt install conntrack socat podman cri-o cri-o-runc -y
 echo
 
 echo "==============================================================================================================================="
