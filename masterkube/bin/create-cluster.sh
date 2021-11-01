@@ -120,7 +120,7 @@ fi
 
 CNI_PLUGIN=$(echo "$CNI_PLUGIN" | tr '[:upper:]' '[:lower:]')
 
-if [ $CLOUD_PROVIDER == "aws" ]; then
+if [ "$CLOUD_PROVIDER" == "aws" ]; then
   KUBELET_EXTRA_ARGS="${KUBELET_EXTRA_ARGS} --cloud-provider=${CLOUD_PROVIDER} --node-ip=${IPADDR}"
   NODENAME=$LOCALHOSTNAME
 else
@@ -174,7 +174,7 @@ EOF
         ;;
 esac
 
-if [ $CLOUD_PROVIDER = "aws" ]; then
+if [ "$CLOUD_PROVIDER" = "aws" ]; then
 cat > ${KUBEADM_CONFIG} <<EOF
 apiVersion: kubeadm.k8s.io/v1beta2
 kind: InitConfiguration
