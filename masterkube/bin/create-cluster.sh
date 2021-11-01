@@ -306,8 +306,6 @@ clusterDNS:
 - ${CLUSTER_DNS}
 failSwapOn: false
 hairpinMode: hairpin-veth
-featureGates:
-  VolumeSubpathEnvExpansion: true
 readOnlyPort: 10255
 clusterDomain: cluster.local
 cpuManagerReconcilePeriod: 0s
