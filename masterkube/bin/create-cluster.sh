@@ -145,7 +145,18 @@ case $CNI_PLUGIN in
           SERVICE_NETWORK_CIDR="10.100.0.0/16"
         fi
         ;;
-    flannel|weave|canal|kube)
+    flannel)
+        POD_NETWORK_CIDR="10.244.0.0/16"
+        mkdir -p /etc/cni/net.d/
+        cat > /etc/cni/net.d/10-crio.conf <<EOF
+{
+    "name": "crio",
+    "cniVersion": "0.3.1",
+    "type": "flannel"
+}
+EOF
+        ;;
+    weave|canal|kube)
         POD_NETWORK_CIDR="10.244.0.0/16"
         ;;
     calico)
