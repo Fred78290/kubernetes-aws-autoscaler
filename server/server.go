@@ -28,13 +28,12 @@ var availableGPUTypes = map[string]string{
 
 // AutoScalerServerApp declare AutoScaler grpc server
 type AutoScalerServerApp struct {
-	ResourceLimiter      *types.ResourceLimiter                `json:"limits"`
-	Groups               map[string]*AutoScalerServerNodeGroup `json:"groups"`
-	Configuration        *types.AutoScalerServerConfig         `json:"config"`
-	KubeAdmConfiguration *apigrpc.KubeAdmConfig                `json:"kubeadm"`
-	NodesDefinition      []*apigrpc.NodeGroupDef               `json:"nodedefs"`
-	AutoProvision        bool                                  `json:"auto"`
-	kubeClient           types.ClientGenerator
+	ResourceLimiter *types.ResourceLimiter                `json:"limits"`
+	Groups          map[string]*AutoScalerServerNodeGroup `json:"groups"`
+	Configuration   *types.AutoScalerServerConfig         `json:"config"`
+	NodesDefinition []*apigrpc.NodeGroupDef               `json:"nodedefs"`
+	AutoProvision   bool                                  `json:"auto"`
+	kubeClient      types.ClientGenerator
 }
 
 //var phAutoScalerServer *AutoScalerServerApp
@@ -63,6 +62,7 @@ func (s *AutoScalerServerApp) newNodeGroup(nodeGroupID string, minNodeSize, maxN
 
 	nodeGroup := &AutoScalerServerNodeGroup{
 		ServiceIdentifier:   s.Configuration.ProviderID,
+		NodeNamePrefix:      s.Configuration.NodeNamePrefix,
 		NodeGroupIdentifier: nodeGroupID,
 		InstanceType:        machineType,
 		DiskType:            machine.DiskType,
@@ -136,8 +136,8 @@ func (s *AutoScalerServerApp) doAutoProvision() error {
 	var ng *AutoScalerServerNodeGroup
 	var err error
 
-	for _, node := range s.NodesDefinition {
-		nodeGroupIdentifier := node.GetNodeGroupID()
+	for _, nodeGroupDef := range s.NodesDefinition {
+		nodeGroupIdentifier := nodeGroupDef.GetNodeGroupID()
 
 		if len(nodeGroupIdentifier) > 0 {
 			ng = s.Groups[nodeGroupIdentifier]
@@ -152,20 +152,18 @@ func (s *AutoScalerServerApp) doAutoProvision() error {
 				}
 
 				// Default labels
-				if node.GetLabels() != nil {
-					for k, v := range node.GetLabels() {
+				if nodeGroupDef.GetLabels() != nil {
+					for k, v := range nodeGroupDef.GetLabels() {
 						labels[k] = v
 					}
 				}
 
-				glog.Infof("Auto provision for nodegroup:%s, minSize:%d, maxSize:%d", nodeGroupIdentifier, node.MinSize, node.MaxSize)
+				glog.Infof("Auto provision for nodegroup:%s, minSize:%d, maxSize:%d", nodeGroupIdentifier, nodeGroupDef.MinSize, nodeGroupDef.MaxSize)
 
-				if _, err = s.newNodeGroup(nodeGroupIdentifier, node.MinSize, node.MaxSize, s.Configuration.DefaultMachineType, labels, systemLabels, true); err == nil {
+				if _, err = s.newNodeGroup(nodeGroupIdentifier, nodeGroupDef.MinSize, nodeGroupDef.MaxSize, s.Configuration.DefaultMachineType, labels, systemLabels, true); err == nil {
 					if ng, err = s.createNodeGroup(nodeGroupIdentifier); err == nil {
-						if node.GetIncludeExistingNode() {
-							if err = ng.autoDiscoveryNodes(s.kubeClient, true); err == nil {
-								return err
-							}
+						if err = ng.autoDiscoveryNodes(s.kubeClient, nodeGroupDef.GetIncludeExistingNode()); err == nil {
+							return err
 						}
 					}
 				}
@@ -173,13 +171,8 @@ func (s *AutoScalerServerApp) doAutoProvision() error {
 				if err != nil {
 					break
 				}
-			} else {
-				// If the nodegroup already exists, reparse nodes
-				if node.GetIncludeExistingNode() {
-					if err = ng.autoDiscoveryNodes(s.kubeClient, true); err == nil {
-						return err
-					}
-				}
+			} else if err = ng.autoDiscoveryNodes(s.kubeClient, nodeGroupDef.GetIncludeExistingNode()); err == nil {
+				return err
 			}
 		}
 	}
