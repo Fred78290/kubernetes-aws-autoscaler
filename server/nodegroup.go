@@ -34,25 +34,51 @@ const (
 // KubernetesLabel labels
 type KubernetesLabel map[string]string
 
+type ServerNodeState int
+
+const (
+	ServerNodeStateNotRunning ServerNodeState = 0
+	ServerNodeStateDeleted    ServerNodeState = 1
+	ServerNodeStateCreating   ServerNodeState = 2
+	ServerNodeStateRunning    ServerNodeState = 3
+)
+
 // AutoScalerServerNodeGroup Group all AutoScaler VM created inside a NodeGroup
 // Each node have name like <node group name>-vm-<vm index>
 type AutoScalerServerNodeGroup struct {
 	sync.Mutex
-	NodeGroupIdentifier  string                           `json:"identifier"`
-	ServiceIdentifier    string                           `json:"service"`
-	InstanceType         string                           `json:"instance-type"`
-	DiskSize             int                              `json:"diskSize"`
-	Status               NodeGroupState                   `json:"status"`
-	MinNodeSize          int                              `json:"minSize"`
-	MaxNodeSize          int                              `json:"maxSize"`
-	Nodes                map[string]*AutoScalerServerNode `json:"nodes"`
-	NodeLabels           KubernetesLabel                  `json:"nodeLabels"`
-	SystemLabels         KubernetesLabel                  `json:"systemLabels"`
-	AutoProvision        bool                             `json:"auto-provision"`
-	LastCreatedNodeIndex int                              `json:"node-index"`
-	pendingNodes         map[string]*AutoScalerServerNode
-	pendingNodesWG       sync.WaitGroup
-	configuration        *types.AutoScalerServerConfig
+	NodeGroupIdentifier string                           `json:"identifier"`
+	ServiceIdentifier   string                           `json:"service"`
+	NodeNamePrefix      string                           `default:"autoscaled" json:"node-name-prefix"`
+	InstanceType        string                           `json:"instance-type"`
+	DiskType            string                           `default:"gp2" json:"diskType"`
+	DiskSize            int                              `json:"diskSize"`
+	Status              NodeGroupState                   `json:"status"`
+	MinNodeSize         int                              `json:"minSize"`
+	MaxNodeSize         int                              `json:"maxSize"`
+	Nodes               map[string]*AutoScalerServerNode `json:"nodes"`
+	NodeLabels          KubernetesLabel                  `json:"nodeLabels"`
+	SystemLabels        KubernetesLabel                  `json:"systemLabels"`
+	AutoProvision       bool                             `json:"auto-provision"`
+	NotOwnedNodes       int                              `json:"not-owned-nodes"`
+	LastNodeIndex       int                              `json:"last-node-index"`
+	RunningNodes        map[int]ServerNodeState          `json:"running-nodes"`
+	pendingNodes        map[string]*AutoScalerServerNode
+	pendingNodesWG      sync.WaitGroup
+	configuration       *types.AutoScalerServerConfig
+}
+
+func (g *AutoScalerServerNodeGroup) findNextNodeIndex() int {
+
+	for index := 0; index <= g.LastNodeIndex; index++ {
+		if run, found := g.RunningNodes[index]; !found || run < ServerNodeStateCreating {
+			return index
+		}
+	}
+
+	g.LastNodeIndex++
+
+	return g.LastNodeIndex
 }
 
 func (g *AutoScalerServerNodeGroup) cleanup(c types.ClientGenerator) error {
@@ -125,20 +151,24 @@ func (g *AutoScalerServerNodeGroup) deleteNodes(c types.ClientGenerator, delta i
 	endIndex := startIndex + delta
 	tempNodes := make([]*AutoScalerServerNode, 0, -delta)
 
-	for nodeIndex := startIndex; nodeIndex >= endIndex; nodeIndex-- {
-		nodeName := g.nodeName(nodeIndex)
+	for index := startIndex; index >= endIndex; index-- {
+		nodeName := g.nodeName(index)
 
-		if node := g.Nodes[nodeName]; node != nil {
-			tempNodes = append(tempNodes, node)
+		if node, found := g.Nodes[nodeName]; found {
+			// Don't delete not owned node
+			if node.AutoProvisionned {
+				tempNodes = append(tempNodes, node)
 
-			if err = node.deleteVM(c); err != nil {
-				glog.Errorf(constantes.ErrUnableToDeleteVM, node.InstanceName, err)
-				break
+				if err = node.deleteVM(c); err != nil {
+					glog.Errorf(constantes.ErrUnableToDeleteVM, node.InstanceName, err)
+					break
+				}
 			}
 		}
 	}
 
 	for _, node := range tempNodes {
+		g.RunningNodes[node.NodeIndex] = ServerNodeStateDeleted
 		delete(g.Nodes, node.InstanceName)
 	}
 
@@ -146,34 +176,32 @@ func (g *AutoScalerServerNodeGroup) deleteNodes(c types.ClientGenerator, delta i
 }
 
 func (g *AutoScalerServerNodeGroup) addNodes(c types.ClientGenerator, delta int) error {
-	var err error
-
 	glog.Debugf("AutoScalerServerNodeGroup::addNodes, nodeGroupID:%s", g.NodeGroupIdentifier)
 
 	tempNodes := make([]*AutoScalerServerNode, 0, delta)
 
-	g.pendingNodesWG.Add(delta)
-
-	for nodeIndex := 0; nodeIndex < delta; nodeIndex++ {
+	for index := 0; index < delta; index++ {
 		if g.Status != NodegroupCreated {
 			glog.Debugf("AutoScalerServerNodeGroup::addNodes, nodeGroupID:%s -> g.status != nodegroupCreated", g.NodeGroupIdentifier)
 			break
 		}
 
-		g.LastCreatedNodeIndex++
-
-		nodeName := g.nodeName(g.LastCreatedNodeIndex)
+		nodeIndex := g.findNextNodeIndex()
+		nodeName := g.nodeName(nodeIndex)
 
 		if awsConfig := g.configuration.GetAwsConfiguration(g.NodeGroupIdentifier); awsConfig != nil {
+
+			g.RunningNodes[nodeIndex] = ServerNodeStateCreating
 
 			node := &AutoScalerServerNode{
 				ProviderID:       g.providerIDForNode(nodeName),
 				NodeGroupID:      g.NodeGroupIdentifier,
 				InstanceName:     nodeName,
 				NodeName:         nodeName,
-				NodeIndex:        g.LastCreatedNodeIndex,
+				NodeIndex:        nodeIndex,
 				InstanceType:     g.InstanceType,
-				Disk:             g.DiskSize,
+				DiskType:         g.DiskType,
+				DiskSize:         g.DiskSize,
 				AutoProvisionned: true,
 				AwsConfig:        awsConfig,
 				serverConfig:     g.configuration,
@@ -191,100 +219,137 @@ func (g *AutoScalerServerNodeGroup) addNodes(c types.ClientGenerator, delta int)
 		}
 	}
 
-	numberOfPendingNodes := len(tempNodes)
+	createNode := func(node *AutoScalerServerNode) error {
+		var err error
 
-	if g.Status != NodegroupCreated {
-		glog.Debugf("AutoScalerServerNodeGroup::addNodes, nodeGroupID:%s -> g.status != nodegroupCreated", g.NodeGroupIdentifier)
-	} else if numberOfPendingNodes > 1 {
+		defer g.pendingNodesWG.Done()
 
-		// WaitGroup
-		wg := sync.WaitGroup{}
-
-		// Number of nodes to launc
-		wg.Add(numberOfPendingNodes)
-
-		type ReturnValue struct {
-			node *AutoScalerServerNode
-			err  error
+		if g.Status != NodegroupCreated {
+			glog.Debugf("AutoScalerServerNodeGroup::addNodes, nodeGroupID:%s -> g.status != nodegroupCreated", g.NodeGroupIdentifier)
+			return fmt.Errorf(constantes.ErrUnableToLaunchVMNodeGroupNotReady, node.InstanceName)
 		}
 
-		// NodeGroup stopped error
-		ngNotRunningErr := fmt.Errorf("nodegroup %s not running", g.NodeGroupIdentifier)
+		if err = node.launchVM(c, g.NodeLabels, g.SystemLabels); err != nil {
+			glog.Errorf(constantes.ErrUnableToLaunchVM, node.NodeName, err)
 
-		// Collect returned error
-		returns := make([]ReturnValue, numberOfPendingNodes)
+			node.cleanOnLaunchError(c, err)
 
-		// Launch wrapper
-		nodeLauncher := func(index int, node *AutoScalerServerNode) {
-			returnValue := ReturnValue{
-				node: node,
-			}
-
-			returns[index] = returnValue
-
-			// Check if NG still running
-			if g.Status == NodegroupCreated {
-				go func() {
-					returnValue.err = node.launchVM(c, g.NodeLabels, g.SystemLabels)
-
-					// Remove from pending
-					delete(g.pendingNodes, node.InstanceName)
-
-					if returnValue.err != nil {
-						node.cleanOnLaunchError(c, returnValue.err)
-					} else {
-						// Add node to running nodes
-						g.Nodes[node.InstanceName] = node
-					}
-
-					// Pending node effective removed
-					g.pendingNodesWG.Done()
-
-					// Notify it's done
-					wg.Done()
-				}()
-			} else {
-				returnValue.err = ngNotRunningErr
-			}
+			g.RunningNodes[node.NodeIndex] = ServerNodeStateDeleted
+		} else {
+			g.Nodes[node.InstanceName] = node
+			g.RunningNodes[node.NodeIndex] = ServerNodeStateRunning
 		}
-
-		// Launch each node in background
-		for nodeIndex, node := range tempNodes {
-			nodeLauncher(nodeIndex, node)
-		}
-
-		// Wait all launched ended
-		wg.Wait()
-
-		// Analyse returns the first occured error
-		for _, result := range returns {
-
-			if result.err == ngNotRunningErr {
-				glog.Debug("Ignore ng not running error")
-			} else if result.err != nil {
-				err = result.err
-				break
-			}
-		}
-	} else {
-		node := tempNodes[0]
 
 		delete(g.pendingNodes, node.InstanceName)
 
-		if err = node.launchVM(c, g.NodeLabels, g.SystemLabels); err != nil {
-			node.cleanOnLaunchError(c, err)
-		} else {
-			g.Nodes[node.InstanceName] = node
-		}
-
-		g.pendingNodesWG.Done()
+		return err
 	}
 
-	return err
+	var result error = nil
+	var successful int
+
+	g.pendingNodesWG.Add(delta)
+
+	// Do sync if one node only
+	if len(tempNodes) == 1 {
+		if err := createNode(tempNodes[0]); err == nil {
+			successful++
+		}
+	} else {
+		var maxCreatedNodePerCycle int
+
+		if g.configuration.MaxCreatedNodePerCycle <= 0 {
+			maxCreatedNodePerCycle = len(tempNodes)
+		} else {
+			maxCreatedNodePerCycle = g.configuration.MaxCreatedNodePerCycle
+		}
+
+		glog.Debugf("Launch node group %s of %d VM by %d nodes per cycle", g.NodeGroupIdentifier, delta, maxCreatedNodePerCycle)
+
+		createNodeAsync := func(currentNode *AutoScalerServerNode, wg *sync.WaitGroup, err chan error) {
+			e := createNode(currentNode)
+			wg.Done()
+			err <- e
+		}
+
+		totalLoop := len(tempNodes) / maxCreatedNodePerCycle
+
+		if len(tempNodes)%maxCreatedNodePerCycle > 0 {
+			totalLoop++
+		}
+
+		currentNodeIndex := 0
+
+		for numberOfCycle := 0; numberOfCycle < totalLoop; numberOfCycle++ {
+			// WaitGroup per segment
+			numberOfNodeInCycle := utils.MinInt(maxCreatedNodePerCycle, len(tempNodes)-currentNodeIndex)
+
+			glog.Debugf("Launched cycle: %d, node per cycle is: %d", numberOfCycle, numberOfNodeInCycle)
+
+			if numberOfNodeInCycle > 1 {
+				ch := make([]chan error, numberOfNodeInCycle)
+				wg := sync.WaitGroup{}
+
+				for nodeInCycle := 0; nodeInCycle < numberOfNodeInCycle; nodeInCycle++ {
+					node := tempNodes[currentNodeIndex]
+					cherr := make(chan error)
+					ch[nodeInCycle] = cherr
+
+					currentNodeIndex++
+
+					wg.Add(1)
+
+					go createNodeAsync(node, &wg, cherr)
+				}
+
+				// Wait this segment to launch
+				glog.Debugf("Wait cycle to finish: %d", numberOfCycle)
+
+				wg.Wait()
+
+				glog.Debugf("Launched cycle: %d, collect result", numberOfCycle)
+
+				for _, chError := range ch {
+					if chError != nil {
+						var err = <-chError
+
+						if err == nil {
+							successful++
+						}
+					}
+				}
+
+				glog.Debugf("Finished cycle: %d", numberOfCycle)
+			} else if numberOfNodeInCycle > 0 {
+				node := tempNodes[currentNodeIndex]
+				currentNodeIndex++
+				if err := createNode(node); err == nil {
+					successful++
+				}
+			} else {
+				break
+			}
+		}
+	}
+
+	g.pendingNodesWG.Wait()
+
+	if g.Status != NodegroupCreated {
+		result = fmt.Errorf(constantes.ErrUnableToLaunchNodeGroupNotCreated, g.NodeGroupIdentifier)
+
+		glog.Errorf("Launched node group %s of %d VM got an error because was destroyed", g.NodeGroupIdentifier, delta)
+	} else if successful == 0 {
+		result = fmt.Errorf(constantes.ErrUnableToLaunchNodeGroup, g.NodeGroupIdentifier)
+		glog.Infof("Launched node group %s of %d VM failed", g.NodeGroupIdentifier, delta)
+	} else {
+		glog.Infof("Launched node group %s of %d/%d VM successful", g.NodeGroupIdentifier, successful, delta)
+	}
+
+	return result
 }
 
-func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(client types.ClientGenerator, scaleDownDisabled bool) error {
-	var lastNodeIndex = 0
+func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(client types.ClientGenerator, includeExistingNode bool) error {
+	var declaredNodeIndex = 0
 	var ec2Instance *aws.Ec2Instance
 	var nodeInfos *apiv1.NodeList
 	var out string
@@ -298,7 +363,9 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(client types.ClientGenera
 
 	g.Nodes = make(map[string]*AutoScalerServerNode)
 	g.pendingNodes = make(map[string]*AutoScalerServerNode)
-	g.LastCreatedNodeIndex = 0
+	g.RunningNodes = make(map[int]ServerNodeState)
+	g.NotOwnedNodes = 0
+	g.LastNodeIndex = 0
 
 	awsConfig := g.configuration.GetAwsConfiguration(g.NodeGroupIdentifier)
 
@@ -309,7 +376,10 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(client types.ClientGenera
 		if len(providerID) > 0 {
 			out, _ = utils.NodeGroupIDFromProviderID(g.ServiceIdentifier, providerID)
 
-			if out == g.NodeGroupIdentifier {
+			autoProvisionned, _ := strconv.ParseBool(nodeInfo.Annotations[constantes.AnnotationNodeAutoProvisionned])
+
+			// Ignore nodes not handled by autoscaler if option includeExistingNode == false
+			if out == g.NodeGroupIdentifier && (autoProvisionned || includeExistingNode) {
 				glog.Infof("Discover node:%s matching nodegroup:%s", providerID, g.NodeGroupIdentifier)
 
 				if instanceName, err = utils.NodeNameFromProviderID(g.ServiceIdentifier, providerID); err == nil {
@@ -323,15 +393,22 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(client types.ClientGenera
 						}
 					}
 
+					glog.Infof("Found node:%s with IP:%s declared nodegroup:%s", instanceName, runningIP, g.NodeGroupIdentifier)
+
 					if len(nodeInfo.Annotations[constantes.AnnotationNodeIndex]) != 0 {
-						lastNodeIndex, _ = strconv.Atoi(nodeInfo.Annotations[constantes.AnnotationNodeIndex])
+						declaredNodeIndex, _ = strconv.Atoi(nodeInfo.Annotations[constantes.AnnotationNodeIndex])
+					} else {
+						declaredNodeIndex = g.LastNodeIndex + 1
 					}
 
-					g.LastCreatedNodeIndex = utils.MaxInt(g.LastCreatedNodeIndex, lastNodeIndex)
+					g.LastNodeIndex = utils.MaxInt(g.LastNodeIndex, declaredNodeIndex)
+
+					if !autoProvisionned {
+						g.NotOwnedNodes++
+					}
 
 					// Node name and instance name could be differ when using AWS cloud provider
 					if ec2Instance, err = aws.GetEc2Instance(awsConfig, instanceName); err == nil {
-
 						if node == nil {
 							glog.Infof("Add node:%s with IP:%s to nodegroup:%s", instanceName, runningIP, g.NodeGroupIdentifier)
 
@@ -340,9 +417,9 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(client types.ClientGenera
 								NodeGroupID:      g.NodeGroupIdentifier,
 								InstanceName:     instanceName,
 								NodeName:         nodeInfo.Name,
-								NodeIndex:        lastNodeIndex,
+								NodeIndex:        declaredNodeIndex,
 								State:            AutoScalerServerNodeStateRunning,
-								AutoProvisionned: nodeInfo.Annotations[constantes.AnnotationNodeAutoProvisionned] == "true",
+								AutoProvisionned: autoProvisionned,
 								AwsConfig:        awsConfig,
 								RunningInstance:  ec2Instance,
 								Addresses: []string{
@@ -352,11 +429,11 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(client types.ClientGenera
 							}
 
 							err = client.AnnoteNode(nodeInfo.Name, map[string]string{
-								constantes.AnnotationScaleDownDisabled:    strconv.FormatBool(scaleDownDisabled && !node.AutoProvisionned),
+								constantes.AnnotationScaleDownDisabled:    strconv.FormatBool(!autoProvisionned),
 								constantes.NodeLabelGroupName:             g.NodeGroupIdentifier,
 								constantes.AnnotationInstanceName:         instanceName,
 								constantes.AnnotationInstanceID:           *ec2Instance.InstanceID,
-								constantes.AnnotationNodeAutoProvisionned: strconv.FormatBool(node.AutoProvisionned),
+								constantes.AnnotationNodeAutoProvisionned: strconv.FormatBool(autoProvisionned),
 								constantes.AnnotationNodeIndex:            strconv.Itoa(node.NodeIndex),
 							})
 
@@ -384,16 +461,17 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(client types.ClientGenera
 						node = nil
 					}
 
-					lastNodeIndex++
-
 					if node != nil {
 						g.Nodes[instanceName] = node
+						g.RunningNodes[node.NodeIndex] = ServerNodeStateRunning
 
 						if _, err = node.statusVM(); err != nil {
 							glog.Warnf("status return %v", err)
 						}
 					}
 				}
+			} else {
+				glog.Infof("Ignore kubernetes node %s not handled by me", nodeInfo.Name)
 			}
 		}
 	}
@@ -406,13 +484,15 @@ func (g *AutoScalerServerNodeGroup) deleteNodeByName(c types.ClientGenerator, no
 
 	var err error
 
-	if node := g.Nodes[nodeName]; node != nil {
+	if node, found := g.Nodes[nodeName]; found {
 
 		if err = node.deleteVM(c); err != nil {
 			glog.Errorf(constantes.ErrUnableToDeleteVM, node.InstanceName, err)
 		}
 
 		delete(g.Nodes, nodeName)
+
+		g.RunningNodes[node.NodeIndex] = ServerNodeStateDeleted
 
 		return err
 	}
@@ -436,8 +516,16 @@ func (g *AutoScalerServerNodeGroup) deleteNodeGroup(c types.ClientGenerator) err
 	return g.cleanup(c)
 }
 
+func (g *AutoScalerServerNodeGroup) getNodePrefix() string {
+	if len(g.NodeNamePrefix) == 0 {
+		return "autoscaled"
+	}
+
+	return g.NodeNamePrefix
+}
+
 func (g *AutoScalerServerNodeGroup) nodeName(vmIndex int) string {
-	return fmt.Sprintf("%s-vm-%02d", g.NodeGroupIdentifier, vmIndex)
+	return fmt.Sprintf("%s-%s-%02d", g.NodeGroupIdentifier, g.getNodePrefix(), vmIndex-g.NotOwnedNodes+1)
 }
 
 func (g *AutoScalerServerNodeGroup) providerID() string {

@@ -102,6 +102,7 @@ func newTestNodeGroup() (*types.AutoScalerServerConfig, *AutoScalerServerNodeGro
 		ng := &AutoScalerServerNodeGroup{
 			ServiceIdentifier:   testProviderID,
 			NodeGroupIdentifier: testGroupID,
+			NodeNamePrefix:      "autoscaled",
 			Status:              NodegroupNotCreated,
 			MinNodeSize:         0,
 			MaxNodeSize:         5,
