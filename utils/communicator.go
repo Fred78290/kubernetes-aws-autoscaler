@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -40,6 +41,35 @@ func AuthMethodFromPrivateKey(key string) ssh.AuthMethod {
 	}
 
 	return nil
+}
+
+// Shell execute local command ignore output
+func Shell(args ...string) error {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	cmd := exec.Command(args[0], args[1:]...)
+
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s, %s", err.Error(), strings.TrimSpace(stderr.String()))
+	}
+
+	return nil
+}
+
+// Scp copy file
+func Scp(connect *types.AutoScalerServerSSH, host, src, dst string) error {
+	return Shell("scp",
+		"-i", connect.GetAuthKeys(),
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-p",
+		"-r",
+		src,
+		fmt.Sprintf("%s@%s:%s", connect.GetUserName(), host, dst))
 }
 
 // Sudo exec ssh command as sudo
