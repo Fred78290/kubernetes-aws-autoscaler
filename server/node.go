@@ -102,9 +102,10 @@ func (vm *AutoScalerServerNode) kubeAdmJoin() error {
 		args = append(args, kubeAdm.ExtraArguments...)
 	}
 
-	if output, err := utils.Sudo(vm.serverConfig.SSH, vm.Addresses[0], vm.AwsConfig.Timeout, strings.Join(args, " ")); err != nil {
-		glog.Errorf("Kubeadm join %s %s return an error: %s", vm.InstanceName, vm.NodeGroupID, output)
-		return err
+	command := strings.Join(args, " ")
+
+	if out, err := utils.Sudo(vm.serverConfig.SSH, vm.Addresses[0], vm.AwsConfig.Timeout, command); err != nil {
+		return fmt.Errorf("unable to execute command: %s, output: %s, reason:%v", command, out, err)
 	}
 
 	return nil
