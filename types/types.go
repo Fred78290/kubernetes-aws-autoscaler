@@ -77,10 +77,11 @@ type ResourceLimiter struct {
 
 // MachineCharacteristic defines VM kind
 type MachineCharacteristic struct {
-	Price  float64 `json:"price"`    // VM price in USD
-	Memory int     `json:"memsize"`  // VM Memory size in megabytes
-	Vcpu   int     `json:"vcpus"`    // VM number of cpus
-	Disk   int     `json:"disksize"` // VM disk size in megabytes
+	Price    float64 `json:"price"`                  // VM price in USD
+	Memory   int     `json:"memsize"`                // VM Memory size in megabytes
+	Vcpu     int     `json:"vcpus"`                  // VM number of cpus
+	DiskType string  `default:"gp2" json:"diskType"` // VM disk size type gp2, gp3.....
+	DiskSize int     `json:"diskSize"`               // VM disk size in megabytes
 }
 
 // KubeJoinConfig give element to join kube master

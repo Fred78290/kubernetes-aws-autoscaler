@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/base64"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -51,7 +52,8 @@ type AutoScalerServerNode struct {
 	NodeName         string                    `json:"node-name"`
 	NodeIndex        int                       `json:"index"`
 	InstanceType     string                    `json:"instance-Type"`
-	Disk             int                       `json:"disk"`
+	DiskType         string                    `default:"standard" json:"diskType"`
+	DiskSize         int                       `json:"diskSize"`
 	Addresses        []string                  `json:"addresses"`
 	State            AutoScalerServerNodeState `json:"state"`
 	AutoProvisionned bool                      `json:"auto"`
@@ -236,7 +238,7 @@ func (vm *AutoScalerServerNode) launchVM(c types.ClientGenerator, nodeLabels, sy
 
 		err = fmt.Errorf(constantes.ErrVMAlreadyCreated, vm.InstanceName)
 
-	} else if vm.RunningInstance, err = aws.Create(vm.NodeIndex, vm.NodeGroupID, vm.InstanceName, vm.InstanceType, vm.Disk, vm.kubeletDefault()); err != nil {
+	} else if vm.RunningInstance, err = aws.Create(vm.NodeIndex, vm.NodeGroupID, vm.InstanceName, vm.InstanceType, vm.DiskType, vm.DiskSize, vm.kubeletDefault()); err != nil {
 
 		err = fmt.Errorf(constantes.ErrUnableToLaunchVM, vm.InstanceName, err)
 

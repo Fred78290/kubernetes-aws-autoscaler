@@ -69,7 +69,8 @@ func createTestNode(ng *AutoScalerServerNodeGroup) *AutoScalerServerNode {
 		InstanceName: testNodeName,
 		NodeName:     testNodeName,
 		InstanceType: "t2.small",
-		Disk:         5120,
+		DiskType:     "gp2",
+		DiskSize:     5120,
 		Addresses: []string{
 			"127.0.0.1",
 		},

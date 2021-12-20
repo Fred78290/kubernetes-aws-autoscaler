@@ -36,7 +36,8 @@ type Configuration struct {
 	KeyName   string        `json:"keyName"`
 	Tags      []Tag         `json:"tags"`
 	Network   *Network      `json:"network"`
-	Disk      int           `json:"diskSize"`
+	DiskType  string        `default:"standard" json:"diskType"`
+	DiskSize  int           `default:"10" json:"diskSize"`
 }
 
 // Tag aws tag
@@ -111,7 +112,7 @@ func (conf *Configuration) GetInstanceID(name string) (*Ec2Instance, error) {
 
 // Create will create a named VM not powered
 // memory and disk are in megabytes
-func (conf *Configuration) Create(nodeIndex int, nodeGroup, name, instanceType string, disk int, userData *string) (*Ec2Instance, error) {
+func (conf *Configuration) Create(nodeIndex int, nodeGroup, name, instanceType string, diskType string, diskSize int, userData *string) (*Ec2Instance, error) {
 	var err error
 	var instance *Ec2Instance
 
@@ -119,7 +120,7 @@ func (conf *Configuration) Create(nodeIndex int, nodeGroup, name, instanceType s
 		return nil, err
 	}
 
-	if err = instance.Create(nodeIndex, nodeGroup, instanceType, userData, disk); err != nil {
+	if err = instance.Create(nodeIndex, nodeGroup, instanceType, userData, diskType, diskSize); err != nil {
 		return nil, err
 	}
 
