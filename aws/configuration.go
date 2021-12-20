@@ -3,9 +3,12 @@ package aws
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand"
+	"reflect"
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
 	glog "github.com/sirupsen/logrus"
 )
 
@@ -55,9 +58,9 @@ type Network struct {
 
 // Eni decalre ENI interface
 type Eni struct {
-	SubnetID        string `json:"subnet"`
-	SecurityGroupID string `json:"securityGroup"`
-	PublicIP        bool   `json:"publicIP"`
+	SubnetsID       interface{} `json:"subnets"`
+	SecurityGroupID string      `json:"securityGroup"`
+	PublicIP        bool        `json:"publicIP"`
 }
 
 // Status shortened vm status
@@ -69,6 +72,10 @@ type Status struct {
 // CallbackCheckIPReady callback to test if IP is up
 type CallbackCheckIPReady interface {
 	CheckIfIPIsReady(name, address string) error
+}
+
+func randomNumberInRange(min, max int) int {
+	return rand.Intn(max-min) + min
 }
 
 func isNullOrEmpty(s string) bool {
@@ -95,6 +102,24 @@ func Copy(dst interface{}, src interface{}) error {
 
 	if err != nil {
 		return fmt.Errorf("unable to unmarshal into dst: %s", err)
+	}
+
+	return nil
+}
+
+func (eni *Eni) GetRandomSubnetsID() *string {
+	var str string
+	s := reflect.ValueOf(eni.SubnetsID)
+
+	switch reflect.TypeOf(eni.SubnetsID).Kind() {
+	case reflect.String:
+		str = s.String()
+	case reflect.Slice:
+		str = fmt.Sprintf("%v", s.Index(randomNumberInRange(0, s.Len()-1)))
+	}
+
+	if len(str) > 0 {
+		return aws.String(str)
 	}
 
 	return nil
