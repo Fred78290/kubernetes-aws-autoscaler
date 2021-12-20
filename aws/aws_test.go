@@ -108,7 +108,7 @@ func Test_createInstance(t *testing.T) {
 	if testFeature("Test_createInstance") {
 		config := loadFromJson(getConfFile())
 
-		_, err := config.Create(0, "test-aws-autoscaler", config.InstanceName, config.InstanceType, config.Disk, nil)
+		_, err := config.Create(0, "test-aws-autoscaler", config.InstanceName, config.InstanceType, config.DiskType, config.DiskSize, nil)
 
 		if assert.NoError(t, err, "Can't create VM") {
 			t.Logf("VM created")
