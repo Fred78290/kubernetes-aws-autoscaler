@@ -23,20 +23,23 @@ const (
 )
 
 type Config struct {
-	APIServerURL    string
-	KubeConfig      string
-	RequestTimeout  time.Duration
-	DeletionTimeout time.Duration
-	MaxGracePeriod  time.Duration
-	Config          string
-	SaveLocation    string
-	DisplayVersion  bool
-	LogFormat       string
-	LogLevel        string
-	MinCpus         int64
-	MinMemory       int64
-	MaxCpus         int64
-	MaxMemory       int64
+	APIServerURL             string
+	KubeConfig               string
+	ExtDestinationEtcdSslDir string
+	ExtSourceEtcdSslDir      string
+	UseExternalEtdc          *bool
+	RequestTimeout           time.Duration
+	DeletionTimeout          time.Duration
+	MaxGracePeriod           time.Duration
+	Config                   string
+	SaveLocation             string
+	DisplayVersion           bool
+	LogFormat                string
+	LogLevel                 string
+	MinCpus                  int64
+	MinMemory                int64
+	MaxCpus                  int64
+	MaxMemory                int64
 }
 
 func (c *Config) GetResourceLimiter() *ResourceLimiter {
@@ -74,10 +77,11 @@ type ResourceLimiter struct {
 
 // MachineCharacteristic defines VM kind
 type MachineCharacteristic struct {
-	Price  float64 `json:"price"`    // VM price in USD
-	Memory int     `json:"memsize"`  // VM Memory size in megabytes
-	Vcpu   int     `json:"vcpus"`    // VM number of cpus
-	Disk   int     `json:"disksize"` // VM disk size in megabytes
+	Price    float64 `json:"price"`                  // VM price in USD
+	Memory   int     `json:"memsize"`                // VM Memory size in megabytes
+	Vcpu     int     `json:"vcpus"`                  // VM number of cpus
+	DiskType string  `default:"gp2" json:"diskType"` // VM disk size type gp2, gp3.....
+	DiskSize int     `json:"diskSize"`               // VM disk size in megabytes
 }
 
 // KubeJoinConfig give element to join kube master
@@ -137,21 +141,26 @@ func (ssh *AutoScalerServerSSH) GetAuthKeys() string {
 
 // AutoScalerServerConfig is contains configuration
 type AutoScalerServerConfig struct {
-	Network            string                            `default:"tcp" json:"network"`         // Mandatory, Network to listen (see grpc doc) to listen
-	Listen             string                            `default:"0.0.0.0:5200" json:"listen"` // Mandatory, Address to listen
-	ProviderID         string                            `json:"secret"`                        // Mandatory, secret Identifier, client must match this
-	MinNode            int                               `json:"minNode"`                       // Mandatory, Min AutoScaler VM
-	MaxNode            int                               `json:"maxNode"`                       // Mandatory, Max AutoScaler VM
-	MaxPods            int                               `json:"maxPods"`                       // Mandatory, Max kubelet pods
-	NodePrice          float64                           `json:"nodePrice"`                     // Optional, The VM price
-	PodPrice           float64                           `json:"podPrice"`                      // Optional, The pod price
-	KubeAdm            KubeJoinConfig                    `json:"kubeadm"`
-	DefaultMachineType string                            `default:"{\"standard\": {}}" json:"default-machine"`
-	Machines           map[string]*MachineCharacteristic `default:"{\"standard\": {}}" json:"machines"` // Mandatory, Available machines
-	Optionals          *AutoScalerServerOptionals        `json:"optionals"`
-	SSH                *AutoScalerServerSSH              `json:"ssh-infos"`
-	CloudProvider      string                            `json:"cloud-provider"`
-	AwsInfos           map[string]*aws.Configuration     `json:"aws"`
+	UseExternalEtdc          bool                              `json:"use-external-etcd"`
+	ExtDestinationEtcdSslDir string                            `json:"src-etcd-ssl-dir"`
+	ExtSourceEtcdSslDir      string                            `json:"dst-etcd-ssl-dir"`
+	Network                  string                            `default:"tcp" json:"network"`                 // Mandatory, Network to listen (see grpc doc) to listen
+	Listen                   string                            `default:"0.0.0.0:5200" json:"listen"`         // Mandatory, Address to listen
+	ProviderID               string                            `json:"secret"`                                // Mandatory, secret Identifier, client must match this
+	MinNode                  int                               `json:"minNode"`                               // Mandatory, Min AutoScaler VM
+	MaxNode                  int                               `json:"maxNode"`                               // Mandatory, Max AutoScaler VM
+	MaxPods                  int                               `json:"maxPods"`                               // Mandatory, Max kubelet pods
+	MaxCreatedNodePerCycle   int                               `json:"maxNode-per-cycle" default:"2"`         // Optional, the max number VM to create in //
+	NodeNamePrefix           string                            `default:"autoscaled" json:"node-name-prefix"` // Optional, the created node name prefix
+	NodePrice                float64                           `json:"nodePrice"`                             // Optional, The VM price
+	PodPrice                 float64                           `json:"podPrice"`                              // Optional, The pod price
+	KubeAdm                  KubeJoinConfig                    `json:"kubeadm"`
+	DefaultMachineType       string                            `default:"standard" json:"default-machine"`
+	Machines                 map[string]*MachineCharacteristic `default:"{\"standard\": {}}" json:"machines"` // Mandatory, Available machines
+	Optionals                *AutoScalerServerOptionals        `json:"optionals"`
+	SSH                      *AutoScalerServerSSH              `json:"ssh-infos"`
+	CloudProvider            string                            `json:"cloud-provider"`
+	AwsInfos                 map[string]*aws.Configuration     `json:"aws"`
 }
 
 // GetAwsConfiguration returns the aws named conf or default
@@ -172,19 +181,22 @@ func (conf *AutoScalerServerConfig) GetAwsConfiguration(name string) *aws.Config
 // NewConfig returns new Config object
 func NewConfig() *Config {
 	return &Config{
-		APIServerURL:    "",
-		KubeConfig:      "",
-		RequestTimeout:  DefaultMaxRequestTimeout,
-		DeletionTimeout: DefaultMaxDeletionPeriod,
-		MaxGracePeriod:  DefaultMaxGracePeriod,
-		DisplayVersion:  false,
-		Config:          "/etc/cluster/aws-cluster-autoscaler.json",
-		MinCpus:         2,
-		MinMemory:       1024,
-		MaxCpus:         24,
-		MaxMemory:       1024 * 24,
-		LogFormat:       "text",
-		LogLevel:        glog.InfoLevel.String(),
+		APIServerURL:             "",
+		KubeConfig:               "",
+		UseExternalEtdc:          nil,
+		ExtDestinationEtcdSslDir: "/etc/etcd/ssl",
+		ExtSourceEtcdSslDir:      "/etc/etcd/ssl",
+		RequestTimeout:           DefaultMaxRequestTimeout,
+		DeletionTimeout:          DefaultMaxDeletionPeriod,
+		MaxGracePeriod:           DefaultMaxGracePeriod,
+		DisplayVersion:           false,
+		Config:                   "/etc/cluster/aws-cluster-autoscaler.json",
+		MinCpus:                  2,
+		MinMemory:                1024,
+		MaxCpus:                  24,
+		MaxMemory:                1024 * 24,
+		LogFormat:                "text",
+		LogLevel:                 glog.InfoLevel.String(),
 	}
 }
 
@@ -206,6 +218,11 @@ func (cfg *Config) ParseFlags(args []string, version string) error {
 
 	app.Flag("log-format", "The format in which log messages are printed (default: text, options: text, json)").Default(cfg.LogFormat).EnumVar(&cfg.LogFormat, "text", "json")
 	app.Flag("log-level", "Set the level of logging. (default: info, options: panic, debug, info, warning, error, fatal").Default(cfg.LogLevel).EnumVar(&cfg.LogLevel, allLogLevelsAsStrings()...)
+
+	// External Etcd
+	app.Flag("use-external-etcd", "Tell we use an external etcd service (default: false)").BoolVar(cfg.UseExternalEtdc)
+	app.Flag("src-etcd-ssl-dir", "Locate the source etcd ssl files (default: /etc/etcd/ssl)").Default("/etc/etcd/ssl").StringVar(&cfg.ExtSourceEtcdSslDir)
+	app.Flag("dst-etcd-ssl-dir", "Locate the destination etcd ssl files (default: /etc/etcd/ssl)").Default("/etc/etcd/ssl").StringVar(&cfg.ExtDestinationEtcdSslDir)
 
 	// Flags related to Kubernetes
 	app.Flag("server", "The Kubernetes API server to connect to (default: auto-detect)").Default(cfg.APIServerURL).StringVar(&cfg.APIServerURL)

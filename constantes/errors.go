@@ -40,6 +40,12 @@ const (
 	// ErrUnableToCreateNodeGroup error msg
 	ErrUnableToCreateNodeGroup = "can't create node group: %s, reason: %v"
 
+	// ErrUnableToLaunchNodeGroupNotCreated error msg
+	ErrUnableToLaunchNodeGroupNotCreated = "unable to launch group: %s, reason: node group is not created"
+
+	// ErrUnableToLaunchNodeGroup error msg
+	ErrUnableToLaunchNodeGroup = "unable to launch group: %s, fail to launch some VMs"
+
 	// ErrUnableToDeleteNodeGroup error msg
 	ErrUnableToDeleteNodeGroup = "can't delete node group: %s, reason: %v"
 
@@ -76,6 +82,9 @@ const (
 	// ErrUnableToLaunchVM error msg
 	ErrUnableToLaunchVM = "unable to launch the VM owned by node: %s, reason: %v"
 
+	// ErrUnableToLaunchVMNodeGroupNotReady error msg
+	ErrUnableToLaunchVMNodeGroupNotReady = "unable to launch the VM owned by node: %s, reason: launch group is not ready"
+
 	// ErrUnableToDeleteVM error msg
 	ErrUnableToDeleteVM = "unable to delete the VM owned by node: %s, reason: %v"
 
@@ -95,7 +104,7 @@ const (
 	ErrTempFile = "can't create temp file, reason: %v"
 
 	// ErrGetVMInfoFailed error msg
-	ErrGetVMInfoFailed = "can't get the VM info from AutoScaler for VM: %s, reason: %v"
+	ErrGetVMInfoFailed = "can't get the info for VM: %s, reason: %v"
 
 	// ErrAutoScalerInfoNotFound error msg
 	ErrAutoScalerInfoNotFound = "can't find the VM info from AutoScaler for VM: %s"
@@ -117,6 +126,9 @@ const (
 
 	// ErrDeleteVMFailed error msg
 	ErrDeleteVMFailed = "could not delete VM: %s, reason: %v"
+
+	// ErrUpdateEtcdSslFailed msg
+	ErrUpdateEtcdSslFailed = "could install etcd ssl on VM: %s, reason: %v"
 
 	// ErrVMNotFound error msg
 	ErrVMNotFound = "unable to find VM: %s"
