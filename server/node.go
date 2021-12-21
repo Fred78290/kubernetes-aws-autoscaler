@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/base64"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -51,7 +52,8 @@ type AutoScalerServerNode struct {
 	NodeName         string                    `json:"node-name"`
 	NodeIndex        int                       `json:"index"`
 	InstanceType     string                    `json:"instance-Type"`
-	Disk             int                       `json:"disk"`
+	DiskType         string                    `default:"standard" json:"diskType"`
+	DiskSize         int                       `json:"diskSize"`
 	Addresses        []string                  `json:"addresses"`
 	State            AutoScalerServerNodeState `json:"state"`
 	AutoProvisionned bool                      `json:"auto"`
@@ -62,6 +64,22 @@ type AutoScalerServerNode struct {
 
 func (s AutoScalerServerNodeState) String() string {
 	return autoScalerServerNodeStateString[s]
+}
+
+func (vm *AutoScalerServerNode) recopyEtcdSslFilesIfNeeded() error {
+	var err error
+
+	if vm.serverConfig.UseExternalEtdc {
+		if err = utils.Scp(vm.serverConfig.SSH, vm.Addresses[0], vm.serverConfig.ExtSourceEtcdSslDir, "."); err == nil {
+			if _, err = utils.Sudo(vm.serverConfig.SSH, vm.Addresses[0], vm.AwsConfig.Timeout, fmt.Sprintf("mkdir -p %s", filepath.Dir(vm.serverConfig.ExtDestinationEtcdSslDir))); err == nil {
+				if _, err = utils.Sudo(vm.serverConfig.SSH, vm.Addresses[0], vm.AwsConfig.Timeout, fmt.Sprintf("mv %s %s", filepath.Base(vm.serverConfig.ExtSourceEtcdSslDir), vm.serverConfig.ExtDestinationEtcdSslDir)); err == nil {
+					_, err = utils.Sudo(vm.serverConfig.SSH, vm.Addresses[0], vm.AwsConfig.Timeout, fmt.Sprintf("chown -R root:root %s", vm.serverConfig.ExtDestinationEtcdSslDir))
+				}
+			}
+		}
+	}
+
+	return err
 }
 
 func (vm *AutoScalerServerNode) kubeAdmJoin() error {
@@ -84,9 +102,10 @@ func (vm *AutoScalerServerNode) kubeAdmJoin() error {
 		args = append(args, kubeAdm.ExtraArguments...)
 	}
 
-	if output, err := utils.Sudo(vm.serverConfig.SSH, vm.Addresses[0], vm.AwsConfig.Timeout, strings.Join(args, " ")); err != nil {
-		glog.Errorf("Kubeadm join %s %s return an error: %s", vm.InstanceName, vm.NodeGroupID, output)
-		return err
+	command := strings.Join(args, " ")
+
+	if out, err := utils.Sudo(vm.serverConfig.SSH, vm.Addresses[0], vm.AwsConfig.Timeout, command); err != nil {
+		return fmt.Errorf("unable to execute command: %s, output: %s, reason:%v", command, out, err)
 	}
 
 	return nil
@@ -220,7 +239,7 @@ func (vm *AutoScalerServerNode) launchVM(c types.ClientGenerator, nodeLabels, sy
 
 		err = fmt.Errorf(constantes.ErrVMAlreadyCreated, vm.InstanceName)
 
-	} else if vm.RunningInstance, err = aws.Create(vm.NodeIndex, vm.NodeGroupID, vm.InstanceName, vm.InstanceType, vm.Disk, vm.kubeletDefault()); err != nil {
+	} else if vm.RunningInstance, err = aws.Create(vm.NodeIndex, vm.NodeGroupID, vm.InstanceName, vm.InstanceType, vm.DiskType, vm.DiskSize, vm.kubeletDefault()); err != nil {
 
 		err = fmt.Errorf(constantes.ErrUnableToLaunchVM, vm.InstanceName, err)
 
@@ -239,6 +258,10 @@ func (vm *AutoScalerServerNode) launchVM(c types.ClientGenerator, nodeLabels, sy
 	} else if status != AutoScalerServerNodeStateRunning {
 
 		err = fmt.Errorf(constantes.ErrStartVMFailed, vm.InstanceName, err)
+
+	} else if err = vm.recopyEtcdSslFilesIfNeeded(); err != nil {
+
+		err = fmt.Errorf(constantes.ErrUpdateEtcdSslFailed, vm.NodeName, err)
 
 	} else if err = vm.kubeAdmJoin(); err != nil {
 
