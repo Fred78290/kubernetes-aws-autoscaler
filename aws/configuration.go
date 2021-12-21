@@ -3,9 +3,12 @@ package aws
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand"
+	"reflect"
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
 	glog "github.com/sirupsen/logrus"
 )
 
@@ -36,7 +39,8 @@ type Configuration struct {
 	KeyName   string        `json:"keyName"`
 	Tags      []Tag         `json:"tags"`
 	Network   *Network      `json:"network"`
-	Disk      int           `json:"diskSize"`
+	DiskType  string        `default:"standard" json:"diskType"`
+	DiskSize  int           `default:"10" json:"diskSize"`
 }
 
 // Tag aws tag
@@ -54,9 +58,9 @@ type Network struct {
 
 // Eni decalre ENI interface
 type Eni struct {
-	SubnetID        string `json:"subnet"`
-	SecurityGroupID string `json:"securityGroup"`
-	PublicIP        bool   `json:"publicIP"`
+	SubnetsID       interface{} `json:"subnets"`
+	SecurityGroupID string      `json:"securityGroup"`
+	PublicIP        bool        `json:"publicIP"`
 }
 
 // Status shortened vm status
@@ -68,6 +72,10 @@ type Status struct {
 // CallbackCheckIPReady callback to test if IP is up
 type CallbackCheckIPReady interface {
 	CheckIfIPIsReady(name, address string) error
+}
+
+func randomNumberInRange(min, max int) int {
+	return rand.Intn(max-min) + min
 }
 
 func isNullOrEmpty(s string) bool {
@@ -99,6 +107,24 @@ func Copy(dst interface{}, src interface{}) error {
 	return nil
 }
 
+func (eni *Eni) GetRandomSubnetsID() *string {
+	var str string
+	s := reflect.ValueOf(eni.SubnetsID)
+
+	switch reflect.TypeOf(eni.SubnetsID).Kind() {
+	case reflect.String:
+		str = s.String()
+	case reflect.Slice:
+		str = fmt.Sprintf("%v", s.Index(randomNumberInRange(0, s.Len()-1)))
+	}
+
+	if len(str) > 0 {
+		return aws.String(str)
+	}
+
+	return nil
+}
+
 // Log logging
 func (conf *Configuration) Log(args ...interface{}) {
 	glog.Infoln(args...)
@@ -111,7 +137,7 @@ func (conf *Configuration) GetInstanceID(name string) (*Ec2Instance, error) {
 
 // Create will create a named VM not powered
 // memory and disk are in megabytes
-func (conf *Configuration) Create(nodeIndex int, nodeGroup, name, instanceType string, disk int, userData *string) (*Ec2Instance, error) {
+func (conf *Configuration) Create(nodeIndex int, nodeGroup, name, instanceType string, diskType string, diskSize int, userData *string) (*Ec2Instance, error) {
 	var err error
 	var instance *Ec2Instance
 
@@ -119,7 +145,7 @@ func (conf *Configuration) Create(nodeIndex int, nodeGroup, name, instanceType s
 		return nil, err
 	}
 
-	if err = instance.Create(nodeIndex, nodeGroup, instanceType, userData, disk); err != nil {
+	if err = instance.Create(nodeIndex, nodeGroup, instanceType, userData, diskType, diskSize); err != nil {
 		return nil, err
 	}
 

@@ -245,7 +245,7 @@ func (instance *Ec2Instance) WaitForPowered() error {
 
 // Create will create a named VM not powered
 // memory and disk are in megabytes
-func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType string, userData *string, disk int) error {
+func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType string, userData *string, diskType string, diskSize int) error {
 	var err error
 	var result *ec2.Reservation
 
@@ -322,7 +322,7 @@ func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType strin
 				DeleteOnTermination:      aws.Bool(true),
 				Description:              aws.String(instance.InstanceName),
 				DeviceIndex:              aws.Int64(int64(index)),
-				SubnetId:                 aws.String(eni.SubnetID),
+				SubnetId:                 eni.GetRandomSubnetsID(),
 				Groups: []*string{
 					aws.String(eni.SecurityGroupID),
 				},
@@ -334,12 +334,21 @@ func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType strin
 		return fmt.Errorf("unable create worker node, any network interface defined")
 	}
 
-	if disk > 0 {
+	if diskSize > 0 || len(diskType) > 0 {
+		if diskSize == 0 {
+			diskSize = 20
+		}
+
+		if len(diskType) == 0 {
+			diskType = "gp2"
+		}
+
 		ebs := &ec2.BlockDeviceMapping{
 			DeviceName: aws.String("/dev/sda1"),
 			Ebs: &ec2.EbsBlockDevice{
 				DeleteOnTermination: aws.Bool(true),
-				VolumeSize:          aws.Int64(int64(disk)),
+				VolumeType:          aws.String(diskType),
+				VolumeSize:          aws.Int64(int64(diskSize)),
 			},
 		}
 

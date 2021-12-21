@@ -2,7 +2,6 @@
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=Fred78290_kubernetes-aws-autoscaler&metric=alert_status)](https://sonarcloud.io/dashboard?id=Fred78290_kubernetes-aws-autoscaler)
 [![Licence](https://img.shields.io/hexpm/l/plug.svg)](https://github.com/Fred78290/kubernetes-aws-autoscaler/blob/master/LICENSE)
 
-
 # kubernetes-aws-autoscaler
 
 Kubernetes autoscaler for aws
@@ -13,7 +12,9 @@ This tool will drive AWS to deploy EC2 instance at the demand. The cluster autos
 
 A sample of the cluster-autoscaler deployment is available at [examples/cluster-autoscaler.yaml](./examples/cluster-autoscaler.yaml). You must fill value between <>
 
-Before you must deploy your kubernetes cluster on vSphere. You can do it from scrash or you can use the script [masterkube/bin/create-masterkube.sh](./masterkube/bin/create-masterkube.sh) to create a simple VM hosting the kubernetes master node.
+### Before you must create a kubernetes cluster on AWS
+
+You can do it from scrash or you can use script from projetct [autoscaled-masterkube-aws](https://github.com/Fred78290/autoscaled-masterkube-aws)  to create a kubernetes cluster in single control plane or in HA mode with 3 control planes.
 
 ## Commandline arguments
 
