@@ -57,7 +57,8 @@ func GetEc2Instance(config *Configuration, instanceName string) (*Ec2Instance, e
 
 		for _, reservation := range result.Reservations {
 			for _, instance := range reservation.Instances {
-				if *instance.State.Code != 48 {
+				// Assume EC2 shutting-down is terminated after
+				if *instance.State.Code != 48 && *instance.State.Code != 32 {
 					return &Ec2Instance{
 						client:       client,
 						config:       config,
