@@ -51,16 +51,25 @@ type Tag struct {
 
 // Network declare network configuration
 type Network struct {
-	ZoneID          *string `json:"route53"`
-	PrivateZoneName *string `json:"privateZoneName"`
-	ENI             []Eni   `json:"eni"`
+	ZoneID          *string            `json:"route53"`
+	PrivateZoneName *string            `json:"privateZoneName"`
+	ENI             []NetworkInterface `json:"eni"`
 }
 
-// Eni decalre ENI interface
-type Eni struct {
+// NetworkInterface declare ENI interface
+type NetworkInterface struct {
 	SubnetsID       interface{} `json:"subnets"`
 	SecurityGroupID string      `json:"securityGroup"`
 	PublicIP        bool        `json:"publicIP"`
+}
+
+// UserDefinedNetworkInterface declare a network interface interface overriding default Eni
+type UserDefinedNetworkInterface struct {
+	NetworkInterfaceID string `json:"networkInterfaceId"`
+	SubnetID           string `json:"subnets"`
+	SecurityGroupID    string `json:"securityGroup"`
+	PrivateAddress     string `json:"privateAddress,omitempty"`
+	PublicIP           bool   `json:"publicIP"`
 }
 
 // Status shortened vm status
@@ -107,7 +116,7 @@ func Copy(dst interface{}, src interface{}) error {
 	return nil
 }
 
-func (eni *Eni) GetRandomSubnetsID() *string {
+func (eni *NetworkInterface) GetRandomSubnetsID() *string {
 	var str string
 	s := reflect.ValueOf(eni.SubnetsID)
 
@@ -137,7 +146,7 @@ func (conf *Configuration) GetInstanceID(name string) (*Ec2Instance, error) {
 
 // Create will create a named VM not powered
 // memory and disk are in megabytes
-func (conf *Configuration) Create(nodeIndex int, nodeGroup, name, instanceType string, diskType string, diskSize int, userData *string) (*Ec2Instance, error) {
+func (conf *Configuration) Create(nodeIndex int, nodeGroup, name, instanceType string, diskType string, diskSize int, userData *string, desiredENI *UserDefinedNetworkInterface) (*Ec2Instance, error) {
 	var err error
 	var instance *Ec2Instance
 
@@ -145,7 +154,7 @@ func (conf *Configuration) Create(nodeIndex int, nodeGroup, name, instanceType s
 		return nil, err
 	}
 
-	if err = instance.Create(nodeIndex, nodeGroup, instanceType, userData, diskType, diskSize); err != nil {
+	if err = instance.Create(nodeIndex, nodeGroup, instanceType, userData, diskType, diskSize, desiredENI); err != nil {
 		return nil, err
 	}
 

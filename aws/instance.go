@@ -244,38 +244,128 @@ func (instance *Ec2Instance) WaitForPowered() error {
 	return fmt.Errorf(constantes.ErrWaitIPTimeout, instance.InstanceName, instance.config.Timeout.String())
 }
 
-// Create will create a named VM not powered
-// memory and disk are in megabytes
-func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType string, userData *string, diskType string, diskSize int) error {
+func (instance *Ec2Instance) buildNetworkInterfaces(desiredENI *UserDefinedNetworkInterface) ([]*ec2.InstanceNetworkInterfaceSpecification, error) {
 	var err error
-	var result *ec2.Reservation
 
-	glog.Debugf("Create: instance name %s in node group %s", instance.InstanceName, nodeGroup)
+	if desiredENI != nil {
+		var privateIPAddress *string
+		var subnetID *string
+		var securityGroup *string
+		var deleteOnTermination bool
+		var networkInterfaceId *string
 
-	// Check if instance is not already created
-	if _, err = GetEc2Instance(instance.config, instance.InstanceName); err == nil {
-		glog.Debugf("Create: instance name %s already exists", instance.InstanceName)
+		if len(desiredENI.PrivateAddress) > 0 {
+			privateIPAddress = aws.String(desiredENI.PrivateAddress)
 
-		return fmt.Errorf(constantes.ErrCantCreateVMAlreadyExist, instance.InstanceName)
+			var output *ec2.DescribeNetworkInterfacesOutput
+			var input = ec2.DescribeNetworkInterfacesInput{
+				Filters: []*ec2.Filter{
+					{
+						Name: aws.String("addresses.private-ip-address"),
+						Values: []*string{
+							privateIPAddress,
+						},
+					},
+				},
+			}
+
+			if output, err = instance.client.DescribeNetworkInterfaces(&input); err != nil {
+				if len(output.NetworkInterfaces) > 0 {
+					privateIPAddress = nil
+					desiredENI.NetworkInterfaceID = *output.NetworkInterfaces[0].NetworkInterfaceId
+					desiredENI.SubnetID = *output.NetworkInterfaces[0].SubnetId
+
+					if len(output.NetworkInterfaces[0].Groups) > 0 {
+						desiredENI.SecurityGroupID = *output.NetworkInterfaces[0].Groups[0].GroupId
+					}
+				}
+			}
+		}
+
+		if len(desiredENI.NetworkInterfaceID) > 0 {
+			deleteOnTermination = false
+			networkInterfaceId = aws.String(desiredENI.NetworkInterfaceID)
+		} else if len(desiredENI.SubnetID) > 0 {
+			subnetID = aws.String(desiredENI.SubnetID)
+		} else {
+			subnetID = instance.config.Network.ENI[0].GetRandomSubnetsID()
+		}
+
+		if len(desiredENI.SecurityGroupID) > 0 {
+			securityGroup = aws.String(desiredENI.SecurityGroupID)
+		} else {
+			securityGroup = aws.String(instance.config.Network.ENI[0].SecurityGroupID)
+		}
+
+		return []*ec2.InstanceNetworkInterfaceSpecification{
+			{
+				AssociatePublicIpAddress: aws.Bool(desiredENI.PublicIP),
+				DeleteOnTermination:      aws.Bool(deleteOnTermination),
+				Description:              aws.String(instance.InstanceName),
+				DeviceIndex:              aws.Int64(0),
+				SubnetId:                 subnetID,
+				NetworkInterfaceId:       networkInterfaceId,
+				PrivateIpAddress:         privateIPAddress,
+				Groups: []*string{
+					securityGroup,
+				},
+			},
+		}, nil
+
+	} else if len(instance.config.Network.ENI) > 0 {
+		interfaces := make([]*ec2.InstanceNetworkInterfaceSpecification, len(instance.config.Network.ENI))
+
+		for index, eni := range instance.config.Network.ENI {
+			inf := &ec2.InstanceNetworkInterfaceSpecification{
+				AssociatePublicIpAddress: aws.Bool(eni.PublicIP),
+				DeleteOnTermination:      aws.Bool(true),
+				Description:              aws.String(instance.InstanceName),
+				DeviceIndex:              aws.Int64(int64(index)),
+				SubnetId:                 eni.GetRandomSubnetsID(),
+				Groups: []*string{
+					aws.String(eni.SecurityGroupID),
+				},
+			}
+			interfaces[index] = inf
+		}
+
+		return interfaces, nil
+	} else {
+		return nil, fmt.Errorf("unable create worker node, any network interface defined")
+	}
+}
+
+func (instance *Ec2Instance) buildBlockDeviceMappings(diskType string, diskSize int) ([]*ec2.BlockDeviceMapping, error) {
+	if diskSize > 0 || len(diskType) > 0 {
+		if diskSize == 0 {
+			diskSize = 20
+		}
+
+		if len(diskType) == 0 {
+			diskType = "gp2"
+		}
+
+		ebs := &ec2.BlockDeviceMapping{
+			DeviceName: aws.String("/dev/sda1"),
+			Ebs: &ec2.EbsBlockDevice{
+				DeleteOnTermination: aws.Bool(true),
+				VolumeType:          aws.String(diskType),
+				VolumeSize:          aws.Int64(int64(diskSize)),
+			},
+		}
+
+		return []*ec2.BlockDeviceMapping{
+			ebs,
+		}, nil
 	}
 
-	ctx := instance.NewContext()
-	defer ctx.Cancel()
+	return nil, nil
+}
 
-	input := &ec2.RunInstancesInput{
-		InstanceType:                      aws.String(instanceType),
-		ImageId:                           aws.String(instance.config.ImageID),
-		KeyName:                           aws.String(instance.config.KeyName),
-		InstanceInitiatedShutdownBehavior: aws.String(ec2.ShutdownBehaviorStop),
-		MaxCount:                          aws.Int64(1),
-		MinCount:                          aws.Int64(1),
-		UserData:                          userData,
-		IamInstanceProfile: &ec2.IamInstanceProfileSpecification{
-			Arn: &instance.config.IamRole,
-		},
-	}
+func (instance *Ec2Instance) buildTagSpecifications(nodeIndex int, nodeGroup string) ([]*ec2.TagSpecification, error) {
+	instanceTags := make([]*ec2.Tag, 0, len(instance.config.Tags)+3)
 
-	instanceTags := append(make([]*ec2.Tag, 0, len(instance.config.Tags)+3), &ec2.Tag{
+	instanceTags = append(instanceTags, &ec2.Tag{
 		Key:   aws.String("Name"),
 		Value: aws.String(instance.InstanceName),
 	})
@@ -305,57 +395,59 @@ func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType strin
 		}
 	}
 
-	input.TagSpecifications = []*ec2.TagSpecification{
+	return []*ec2.TagSpecification{
 		{
 			ResourceType: aws.String(ec2.ResourceTypeInstance),
 			Tags:         instanceTags,
 		},
+	}, nil
+
+}
+
+// Create will create a named VM not powered
+// memory and disk are in megabytes
+func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType string, userData *string, diskType string, diskSize int, desiredENI *UserDefinedNetworkInterface) error {
+	var err error
+	var result *ec2.Reservation
+
+	glog.Debugf("Create: instance name %s in node group %s", instance.InstanceName, nodeGroup)
+
+	// Check if instance is not already created
+	if _, err = GetEc2Instance(instance.config, instance.InstanceName); err == nil {
+		glog.Debugf("Create: instance name %s already exists", instance.InstanceName)
+
+		return fmt.Errorf(constantes.ErrCantCreateVMAlreadyExist, instance.InstanceName)
 	}
 
-	if len(instance.config.Network.ENI) > 0 {
-		interfaces := make([]*ec2.InstanceNetworkInterfaceSpecification, len(instance.config.Network.ENI))
+	ctx := instance.NewContext()
+	defer ctx.Cancel()
 
-		input.NetworkInterfaces = interfaces
-
-		for index, eni := range instance.config.Network.ENI {
-			inf := &ec2.InstanceNetworkInterfaceSpecification{
-				AssociatePublicIpAddress: aws.Bool(eni.PublicIP),
-				DeleteOnTermination:      aws.Bool(true),
-				Description:              aws.String(instance.InstanceName),
-				DeviceIndex:              aws.Int64(int64(index)),
-				SubnetId:                 eni.GetRandomSubnetsID(),
-				Groups: []*string{
-					aws.String(eni.SecurityGroupID),
-				},
-			}
-			interfaces[index] = inf
-		}
-
-	} else {
-		return fmt.Errorf("unable create worker node, any network interface defined")
+	input := &ec2.RunInstancesInput{
+		InstanceType:                      aws.String(instanceType),
+		ImageId:                           aws.String(instance.config.ImageID),
+		KeyName:                           aws.String(instance.config.KeyName),
+		InstanceInitiatedShutdownBehavior: aws.String(ec2.ShutdownBehaviorStop),
+		MaxCount:                          aws.Int64(1),
+		MinCount:                          aws.Int64(1),
+		UserData:                          userData,
+		IamInstanceProfile: &ec2.IamInstanceProfileSpecification{
+			Arn: &instance.config.IamRole,
+		},
 	}
 
-	if diskSize > 0 || len(diskType) > 0 {
-		if diskSize == 0 {
-			diskSize = 20
-		}
+	// Add tags
+	if input.TagSpecifications, err = instance.buildTagSpecifications(nodeIndex, nodeGroup); err != nil {
+		return err
+	}
 
-		if len(diskType) == 0 {
-			diskType = "gp2"
-		}
+	// Add ENI
+	if input.NetworkInterfaces, err = instance.buildNetworkInterfaces(desiredENI); err != nil {
+		return err
+	}
 
-		ebs := &ec2.BlockDeviceMapping{
-			DeviceName: aws.String("/dev/sda1"),
-			Ebs: &ec2.EbsBlockDevice{
-				DeleteOnTermination: aws.Bool(true),
-				VolumeType:          aws.String(diskType),
-				VolumeSize:          aws.Int64(int64(diskSize)),
-			},
-		}
-
-		input.BlockDeviceMappings = []*ec2.BlockDeviceMapping{
-			ebs,
-		}
+	// Add Block device
+	if input.BlockDeviceMappings, err = instance.buildBlockDeviceMappings(diskType, diskSize); err != nil {
+		return err
 	}
 
 	if result, err = instance.client.RunInstancesWithContext(ctx, input); err != nil {

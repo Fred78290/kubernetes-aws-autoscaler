@@ -6,16 +6,23 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Fred78290/kubernetes-aws-autoscaler/aws"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/constantes"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/types"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/utils"
 	glog "github.com/sirupsen/logrus"
+	apiv1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	uid "k8s.io/apimachinery/pkg/types"
 )
 
 // AutoScalerServerNodeState VM state
 type AutoScalerServerNodeState int32
+
+// AutoScalerServerNodeType node class (external, autoscaled, managed)
+type AutoScalerServerNodeType int32
 
 // autoScalerServerNodeStateString strings
 var autoScalerServerNodeStateString = []string{
@@ -28,37 +35,54 @@ var autoScalerServerNodeStateString = []string{
 
 const (
 	// AutoScalerServerNodeStateNotCreated not created state
-	AutoScalerServerNodeStateNotCreated AutoScalerServerNodeState = 0
+	AutoScalerServerNodeStateNotCreated = iota
 
 	// AutoScalerServerNodeStateRunning running state
-	AutoScalerServerNodeStateRunning AutoScalerServerNodeState = 1
+	AutoScalerServerNodeStateRunning
 
 	// AutoScalerServerNodeStateStopped stopped state
-	AutoScalerServerNodeStateStopped AutoScalerServerNodeState = 2
+	AutoScalerServerNodeStateStopped
 
 	// AutoScalerServerNodeStateDeleted deleted state
-	AutoScalerServerNodeStateDeleted AutoScalerServerNodeState = 3
+	AutoScalerServerNodeStateDeleted
 
 	// AutoScalerServerNodeStateUndefined undefined state
-	AutoScalerServerNodeStateUndefined AutoScalerServerNodeState = 4
+	AutoScalerServerNodeStateUndefined
+)
+
+const (
+	// AutoScalerServerNodeExternal is a node create out of autoscaler
+	AutoScalerServerNodeExternal = iota
+	// AutoScalerServerNodeAutoscaled is a node create by autoscaler
+	AutoScalerServerNodeAutoscaled
+	// AutoScalerServerNodeManaged is a node managed by controller
+	AutoScalerServerNodeManaged
 )
 
 // AutoScalerServerNode Describe a AutoScaler VM
+// Node name and instance name could be differ when using AWS cloud provider
 type AutoScalerServerNode struct {
-	ProviderID  string `json:"providerID"`
-	NodeGroupID string `json:"group"`
-	// Node name and instance name could be differ when using AWS cloud provider
+	ProviderID       string                    `json:"providerID"`
+	NodeGroupID      string                    `json:"group"`
 	InstanceName     string                    `json:"instance-name"`
 	NodeName         string                    `json:"node-name"`
 	NodeIndex        int                       `json:"index"`
-	InstanceType     string                    `json:"instance-Type"`
-	DiskType         string                    `default:"standard" json:"diskType"`
+	UID              uid.UID                   `json:"crd-uid"`
+	Memory           int                       `json:"memory"`
+	CPU              int                       `json:"cpu"`
 	DiskSize         int                       `json:"diskSize"`
-	Addresses        []string                  `json:"addresses"`
+	DiskType         string                    `default:"standard" json:"diskType"`
+	InstanceType     string                    `json:"instance-Type"`
+	IPAddress        string                    `json:"address"`
 	State            AutoScalerServerNodeState `json:"state"`
-	AutoProvisionned bool                      `json:"auto"`
-	AwsConfig        *aws.Configuration        `json:"aws"`
-	RunningInstance  *aws.Ec2Instance
+	NodeType         AutoScalerServerNodeType  `json:"type"`
+	ControlPlaneNode bool                      `json:"control-plane,omitempty"`
+	AllowDeployment  bool                      `json:"allow-deployment,omitempty"`
+	ExtraLabels      KubernetesLabel           `json:"labels,omitempty"`
+	ExtraAnnotations KubernetesLabel           `json:"annotations,omitempty"`
+	awsConfig        *aws.Configuration
+	runningInstance  *aws.Ec2Instance
+	desiredENI       *aws.DesiredENI
 	serverConfig     *types.AutoScalerServerConfig
 }
 
@@ -69,13 +93,33 @@ func (s AutoScalerServerNodeState) String() string {
 func (vm *AutoScalerServerNode) recopyEtcdSslFilesIfNeeded() error {
 	var err error
 
-	if vm.serverConfig.UseExternalEtdc {
-		if err = utils.Scp(vm.serverConfig.SSH, vm.Addresses[0], vm.serverConfig.ExtSourceEtcdSslDir, "."); err == nil {
-			if _, err = utils.Sudo(vm.serverConfig.SSH, vm.Addresses[0], vm.AwsConfig.Timeout, fmt.Sprintf("mkdir -p %s", filepath.Dir(vm.serverConfig.ExtDestinationEtcdSslDir))); err == nil {
-				if _, err = utils.Sudo(vm.serverConfig.SSH, vm.Addresses[0], vm.AwsConfig.Timeout, fmt.Sprintf("mv %s %s", filepath.Base(vm.serverConfig.ExtSourceEtcdSslDir), vm.serverConfig.ExtDestinationEtcdSslDir)); err == nil {
-					_, err = utils.Sudo(vm.serverConfig.SSH, vm.Addresses[0], vm.AwsConfig.Timeout, fmt.Sprintf("chown -R root:root %s", vm.serverConfig.ExtDestinationEtcdSslDir))
-				}
-			}
+	if vm.ControlPlaneNode || *vm.serverConfig.UseExternalEtdc {
+		if err = utils.Scp(vm.serverConfig.SSH, vm.IPAddress, vm.serverConfig.ExtSourceEtcdSslDir, "."); err != nil {
+			glog.Errorf("scp failed: %v", err)
+		} else if _, err = utils.Sudo(vm.serverConfig.SSH, vm.IPAddress, vm.awsConfig.Timeout, fmt.Sprintf("mkdir -p %s", vm.serverConfig.ExtDestinationEtcdSslDir)); err != nil {
+			glog.Errorf("mkdir failed: %v", err)
+		} else if _, err = utils.Sudo(vm.serverConfig.SSH, vm.IPAddress, vm.awsConfig.Timeout, fmt.Sprintf("cp -r %s/* %s", filepath.Base(vm.serverConfig.ExtSourceEtcdSslDir), vm.serverConfig.ExtDestinationEtcdSslDir)); err != nil {
+			glog.Errorf("mv failed: %v", err)
+		} else if _, err = utils.Sudo(vm.serverConfig.SSH, vm.IPAddress, vm.awsConfig.Timeout, fmt.Sprintf("chown -R root:root %s", vm.serverConfig.ExtDestinationEtcdSslDir)); err != nil {
+			glog.Errorf("chown failed: %v", err)
+		}
+	}
+
+	return err
+}
+
+func (vm *AutoScalerServerNode) recopyKubernetesPKIIfNeeded() error {
+	var err error
+
+	if vm.ControlPlaneNode {
+		if err = utils.Scp(vm.serverConfig.SSH, vm.IPAddress, vm.serverConfig.KubernetesPKISourceDir, "."); err != nil {
+			glog.Errorf("scp failed: %v", err)
+		} else if _, err = utils.Sudo(vm.serverConfig.SSH, vm.IPAddress, vm.awsConfig.Timeout, fmt.Sprintf("mkdir -p %s", vm.serverConfig.KubernetesPKIDestDir)); err != nil {
+			glog.Errorf("mkdir failed: %v", err)
+		} else if _, err = utils.Sudo(vm.serverConfig.SSH, vm.IPAddress, vm.awsConfig.Timeout, fmt.Sprintf("cp -r %s/* %s", filepath.Base(vm.serverConfig.KubernetesPKISourceDir), vm.serverConfig.KubernetesPKIDestDir)); err != nil {
+			glog.Errorf("mv failed: %v", err)
+		} else if _, err = utils.Sudo(vm.serverConfig.SSH, vm.IPAddress, vm.awsConfig.Timeout, fmt.Sprintf("chown -R root:root %s", vm.serverConfig.KubernetesPKIDestDir)); err != nil {
+			glog.Errorf("chown failed: %v", err)
 		}
 	}
 
@@ -95,6 +139,12 @@ func (vm *AutoScalerServerNode) kubeAdmJoin() error {
 		kubeAdm.Token,
 		"--discovery-token-ca-cert-hash",
 		kubeAdm.CACert,
+		"--apiserver-advertise-address",
+		vm.IPAddress,
+	}
+
+	if vm.ControlPlaneNode {
+		args = append(args, "--control-plane")
 	}
 
 	// Append extras arguments
@@ -104,15 +154,27 @@ func (vm *AutoScalerServerNode) kubeAdmJoin() error {
 
 	command := strings.Join(args, " ")
 
-	if out, err := utils.Sudo(vm.serverConfig.SSH, vm.Addresses[0], vm.AwsConfig.Timeout, command); err != nil {
+	if out, err := utils.Sudo(vm.serverConfig.SSH, vm.IPAddress, vm.awsConfig.Timeout, command); err != nil {
 		return fmt.Errorf("unable to execute command: %s, output: %s, reason:%v", command, out, err)
 	}
 
 	return nil
 }
 
+func (vm *AutoScalerServerNode) retrieveNodeInfo(c types.ClientGenerator) error {
+	if nodeInfo, err := c.GetNode(vm.NodeName); err != nil {
+		return err
+	} else {
+		vm.CPU = int(nodeInfo.Status.Capacity.Cpu().Value())
+		vm.Memory = int(nodeInfo.Status.Capacity.Memory().Value() / (1024 * 1024))
+		vm.DiskSize = int(nodeInfo.Status.Capacity.Storage().Value() / (1024 * 1024))
+	}
+
+	return nil
+}
+
 func (vm *AutoScalerServerNode) setNodeLabels(c types.ClientGenerator, nodeLabels, systemLabels KubernetesLabel) error {
-	labels := map[string]string{
+	labels := KubernetesLabel{
 		constantes.NodeLabelGroupName: vm.NodeGroupID,
 	}
 
@@ -129,16 +191,51 @@ func (vm *AutoScalerServerNode) setNodeLabels(c types.ClientGenerator, nodeLabel
 		return fmt.Errorf(constantes.ErrLabelNodeReturnError, vm.NodeName, err)
 	}
 
-	annotations := map[string]string{
+	if len(vm.ExtraLabels) > 0 {
+		if err := c.LabelNode(vm.NodeName, vm.ExtraLabels); err != nil {
+			return fmt.Errorf(constantes.ErrLabelNodeReturnError, vm.NodeName, err)
+		}
+	}
+
+	annotations := KubernetesLabel{
 		constantes.NodeLabelGroupName:             vm.NodeGroupID,
-		constantes.AnnotationInstanceName:         vm.InstanceName,
-		constantes.AnnotationInstanceID:           *vm.RunningInstance.InstanceID,
-		constantes.AnnotationNodeAutoProvisionned: strconv.FormatBool(vm.AutoProvisionned),
+		constantes.AnnotationScaleDownDisabled:    strconv.FormatBool(vm.NodeType != AutoScalerServerNodeAutoscaled),
+		constantes.AnnotationNodeAutoProvisionned: strconv.FormatBool(vm.NodeType == AutoScalerServerNodeAutoscaled),
+		constantes.AnnotationNodeManaged:          strconv.FormatBool(vm.NodeType == AutoScalerServerNodeManaged),
 		constantes.AnnotationNodeIndex:            strconv.Itoa(vm.NodeIndex),
+		constantes.AnnotationInstanceName:         vm.InstanceName,
+		constantes.AnnotationInstanceID:           *vm.runningInstance.InstanceID,
 	}
 
 	if err := c.AnnoteNode(vm.NodeName, annotations); err != nil {
 		return fmt.Errorf(constantes.ErrAnnoteNodeReturnError, vm.NodeName, err)
+	}
+
+	if len(vm.ExtraAnnotations) > 0 {
+		if err := c.AnnoteNode(vm.NodeName, vm.ExtraAnnotations); err != nil {
+			return fmt.Errorf(constantes.ErrAnnoteNodeReturnError, vm.NodeName, err)
+		}
+
+	}
+
+	if vm.ControlPlaneNode && vm.AllowDeployment {
+		if err := c.TaintNode(vm.NodeName,
+			apiv1.Taint{
+				Key:    constantes.NodeLabelControlPlaneRole,
+				Effect: apiv1.TaintEffectNoSchedule,
+				TimeAdded: &metav1.Time{
+					Time: time.Now(),
+				},
+			},
+			apiv1.Taint{
+				Key:    constantes.NodeLabelMasterRole,
+				Effect: apiv1.TaintEffectNoSchedule,
+				TimeAdded: &metav1.Time{
+					Time: time.Now(),
+				},
+			}); err != nil {
+			return fmt.Errorf(constantes.ErrTaintNodeReturnError, vm.NodeName, err)
+		}
 	}
 
 	return nil
@@ -172,10 +269,10 @@ func (vm *AutoScalerServerNode) CheckIfIPIsReady(nodename, address string) error
 func (vm *AutoScalerServerNode) registerDNS(address string) error {
 	var err error
 
-	aws := vm.AwsConfig
+	aws := vm.awsConfig
 
 	if aws.Network.ZoneID != nil {
-		err = vm.RunningInstance.RegisterDNS(*aws.Network.ZoneID, fmt.Sprintf("%s.%s", vm.InstanceName, *aws.Network.PrivateZoneName), address, false)
+		err = vm.runningInstance.RegisterDNS(*aws.Network.ZoneID, fmt.Sprintf("%s.%s", vm.InstanceName, *aws.Network.PrivateZoneName), address, false)
 	}
 
 	return err
@@ -184,10 +281,10 @@ func (vm *AutoScalerServerNode) registerDNS(address string) error {
 func (vm *AutoScalerServerNode) unregisterDNS(address string) error {
 	var err error
 
-	aws := vm.AwsConfig
+	aws := vm.awsConfig
 
 	if aws.Network.ZoneID != nil {
-		err = vm.RunningInstance.UnRegisterDNS(*aws.Network.ZoneID, fmt.Sprintf("%s.%s", vm.InstanceName, *aws.Network.PrivateZoneName), address, false)
+		err = vm.runningInstance.UnRegisterDNS(*aws.Network.ZoneID, fmt.Sprintf("%s.%s", vm.InstanceName, *aws.Network.PrivateZoneName), address, false)
 	}
 
 	return err
@@ -227,11 +324,11 @@ func (vm *AutoScalerServerNode) launchVM(c types.ClientGenerator, nodeLabels, sy
 	var status AutoScalerServerNodeState
 	var address *string
 
-	aws := vm.AwsConfig
+	aws := vm.awsConfig
 
 	glog.Infof("Launch VM:%s for nodegroup: %s", vm.InstanceName, vm.NodeGroupID)
 
-	if !vm.AutoProvisionned {
+	if vm.NodeType != AutoScalerServerNodeAutoscaled && vm.NodeType != AutoScalerServerNodeManaged {
 
 		err = fmt.Errorf(constantes.ErrVMNotProvisionnedByMe, vm.InstanceName)
 
@@ -239,11 +336,11 @@ func (vm *AutoScalerServerNode) launchVM(c types.ClientGenerator, nodeLabels, sy
 
 		err = fmt.Errorf(constantes.ErrVMAlreadyCreated, vm.InstanceName)
 
-	} else if vm.RunningInstance, err = aws.Create(vm.NodeIndex, vm.NodeGroupID, vm.InstanceName, vm.InstanceType, vm.DiskType, vm.DiskSize, vm.kubeletDefault()); err != nil {
+	} else if vm.runningInstance, err = aws.Create(vm.NodeIndex, vm.NodeGroupID, vm.InstanceName, vm.InstanceType, vm.DiskType, vm.DiskSize, vm.kubeletDefault(), vm.desiredENI); err != nil {
 
 		err = fmt.Errorf(constantes.ErrUnableToLaunchVM, vm.InstanceName, err)
 
-	} else if address, err = vm.RunningInstance.WaitForIP(vm); err != nil {
+	} else if address, err = vm.runningInstance.WaitForIP(vm); err != nil {
 
 		err = fmt.Errorf(constantes.ErrStartVMFailed, vm.InstanceName, err)
 
@@ -259,6 +356,10 @@ func (vm *AutoScalerServerNode) launchVM(c types.ClientGenerator, nodeLabels, sy
 
 		err = fmt.Errorf(constantes.ErrStartVMFailed, vm.InstanceName, err)
 
+	} else if err = vm.recopyKubernetesPKIIfNeeded(); err != nil {
+
+		err = fmt.Errorf(constantes.ErrRecopyKubernetesPKIFailed, vm.NodeName, err)
+
 	} else if err = vm.recopyEtcdSslFilesIfNeeded(); err != nil {
 
 		err = fmt.Errorf(constantes.ErrUpdateEtcdSslFailed, vm.NodeName, err)
@@ -272,6 +373,10 @@ func (vm *AutoScalerServerNode) launchVM(c types.ClientGenerator, nodeLabels, sy
 		err = fmt.Errorf(constantes.ErrProviderIDNotConfigured, vm.NodeName, err)
 
 	} else if err = c.WaitNodeToBeReady(vm.NodeName, int(aws.Timeout)); err != nil {
+
+		err = fmt.Errorf(constantes.ErrNodeIsNotReady, vm.InstanceName)
+
+	} else if err = vm.retrieveNodeInfo(c); err != nil {
 
 		err = fmt.Errorf(constantes.ErrNodeIsNotReady, vm.InstanceName)
 
@@ -296,7 +401,7 @@ func (vm *AutoScalerServerNode) startVM(c types.ClientGenerator) error {
 
 	glog.Infof("Start VM:%s", vm.InstanceName)
 
-	if !vm.AutoProvisionned || vm.RunningInstance == nil {
+	if (vm.NodeType != AutoScalerServerNodeAutoscaled && vm.NodeType != AutoScalerServerNodeManaged) || vm.runningInstance == nil {
 
 		err = fmt.Errorf(constantes.ErrVMNotProvisionnedByMe, vm.InstanceName)
 
@@ -306,11 +411,11 @@ func (vm *AutoScalerServerNode) startVM(c types.ClientGenerator) error {
 
 	} else if state == AutoScalerServerNodeStateStopped {
 
-		if err = vm.RunningInstance.PowerOn(); err != nil {
+		if err = vm.runningInstance.PowerOn(); err != nil {
 
 			err = fmt.Errorf(constantes.ErrStartVMFailed, vm.InstanceName, err)
 
-		} else if _, err = vm.RunningInstance.WaitForIP(vm); err != nil {
+		} else if _, err = vm.runningInstance.WaitForIP(vm); err != nil {
 
 			err = fmt.Errorf(constantes.ErrStartVMFailed, vm.InstanceName, err)
 
@@ -352,7 +457,7 @@ func (vm *AutoScalerServerNode) stopVM(c types.ClientGenerator) error {
 
 	glog.Infof("Stop VM:%s", vm.InstanceName)
 
-	if !vm.AutoProvisionned || vm.RunningInstance == nil {
+	if (vm.NodeType != AutoScalerServerNodeAutoscaled && vm.NodeType != AutoScalerServerNodeManaged) || vm.runningInstance == nil {
 
 		err = fmt.Errorf(constantes.ErrVMNotProvisionnedByMe, vm.InstanceName)
 
@@ -366,7 +471,7 @@ func (vm *AutoScalerServerNode) stopVM(c types.ClientGenerator) error {
 			glog.Errorf(constantes.ErrCordonNodeReturnError, vm.NodeName, err)
 		}
 
-		if err = vm.RunningInstance.PowerOff(); err == nil {
+		if err = vm.runningInstance.PowerOff(); err == nil {
 			vm.State = AutoScalerServerNodeStateStopped
 		} else {
 			err = fmt.Errorf(constantes.ErrStopVMFailed, vm.InstanceName, err)
@@ -393,37 +498,39 @@ func (vm *AutoScalerServerNode) deleteVM(c types.ClientGenerator) error {
 	var err error
 	var status *aws.Status
 
-	if !vm.AutoProvisionned || vm.RunningInstance == nil {
+	if (vm.NodeType != AutoScalerServerNodeAutoscaled && vm.NodeType != AutoScalerServerNodeManaged) || vm.runningInstance == nil {
 		err = fmt.Errorf(constantes.ErrVMNotProvisionnedByMe, vm.InstanceName)
 	} else {
-		if status, err = vm.RunningInstance.Status(); err == nil {
+		if status, err = vm.runningInstance.Status(); err == nil {
 			if err = vm.unregisterDNS(status.Address); err != nil {
 				glog.Warnf("unable to unregister DNS entry, reason: %v", err)
 			}
-
 			if status.Powered {
-				if err = c.MarkDrainNode(vm.NodeName); err != nil {
-					glog.Errorf(constantes.ErrCordonNodeReturnError, vm.NodeName, err)
+				// Delete kubernetes node only is alive
+				if _, err = c.GetNode(vm.NodeName); err == nil {
+					if err = c.MarkDrainNode(vm.NodeName); err != nil {
+						glog.Errorf(constantes.ErrCordonNodeReturnError, vm.NodeName, err)
+					}
+
+					if err = c.DrainNode(vm.NodeName, true, true); err != nil {
+						glog.Errorf(constantes.ErrDrainNodeReturnError, vm.NodeName, err)
+					}
+
+					if err = c.DeleteNode(vm.NodeName); err != nil {
+						glog.Errorf(constantes.ErrDeleteNodeReturnError, vm.NodeName, err)
+					}
 				}
 
-				if err = c.DrainNode(vm.NodeName, true, true); err != nil {
-					glog.Errorf(constantes.ErrDrainNodeReturnError, vm.NodeName, err)
-				}
-
-				if err = c.DeleteNode(vm.NodeName); err != nil {
-					glog.Errorf(constantes.ErrDeleteNodeReturnError, vm.NodeName, err)
-				}
-
-				if err = vm.RunningInstance.PowerOff(); err != nil {
+				if err = vm.runningInstance.PowerOff(); err != nil {
 					err = fmt.Errorf(constantes.ErrStopVMFailed, vm.InstanceName, err)
 				} else {
 					vm.State = AutoScalerServerNodeStateStopped
 
-					if err = vm.RunningInstance.Delete(); err != nil {
+					if err = vm.runningInstance.Delete(); err != nil {
 						err = fmt.Errorf(constantes.ErrDeleteVMFailed, vm.InstanceName, err)
 					}
 				}
-			} else if err = vm.RunningInstance.Delete(); err != nil {
+			} else if err = vm.runningInstance.Delete(); err != nil {
 				err = fmt.Errorf(constantes.ErrDeleteVMFailed, vm.InstanceName, err)
 			}
 		}
@@ -446,19 +553,17 @@ func (vm *AutoScalerServerNode) statusVM() (AutoScalerServerNodeState, error) {
 	var status *aws.Status
 	var err error
 
-	if vm.RunningInstance == nil {
+	if vm.runningInstance == nil {
 		return AutoScalerServerNodeStateNotCreated, nil
 	}
 
-	if status, err = vm.RunningInstance.Status(); err != nil {
+	if status, err = vm.runningInstance.Status(); err != nil {
 		glog.Errorf(constantes.ErrGetVMInfoFailed, vm.InstanceName, err)
 		return AutoScalerServerNodeStateUndefined, err
 	}
 
 	if status != nil {
-		vm.Addresses = []string{
-			status.Address,
-		}
+		vm.IPAddress = status.Address
 
 		if status.Powered {
 			vm.State = AutoScalerServerNodeStateRunning
