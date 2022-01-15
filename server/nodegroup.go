@@ -215,7 +215,7 @@ func (g *AutoScalerServerNodeGroup) addManagedNode(crd *v1alpha1.ManagedNode) (*
 	nodeName := g.nodeName(nodeIndex, controlPlane, true)
 
 	if awsConfig := g.configuration.GetAwsConfiguration(g.NodeGroupIdentifier); awsConfig != nil {
-		var desiredENI *aws.DesiredENI
+		var desiredENI *aws.UserDefinedNetworkInterface
 
 		g.RunningNodes[nodeIndex] = ServerNodeStateCreating
 
@@ -227,7 +227,7 @@ func (g *AutoScalerServerNodeGroup) addManagedNode(crd *v1alpha1.ManagedNode) (*
 		if crd.Spec.ENI != nil {
 			eni := crd.Spec.ENI
 			if len(eni.SubnetID)+len(eni.SecurityGroupID) > 0 {
-				desiredENI = &aws.DesiredENI{
+				desiredENI = &aws.UserDefinedNetworkInterface{
 					NetworkInterfaceID: eni.NetworkInterfaceID,
 					SubnetID:           eni.SubnetID,
 					SecurityGroupID:    eni.SecurityGroupID,

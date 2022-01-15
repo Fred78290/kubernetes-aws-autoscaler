@@ -82,7 +82,7 @@ type AutoScalerServerNode struct {
 	ExtraAnnotations KubernetesLabel           `json:"annotations,omitempty"`
 	awsConfig        *aws.Configuration
 	runningInstance  *aws.Ec2Instance
-	desiredENI       *aws.DesiredENI
+	desiredENI       *aws.UserDefinedNetworkInterface
 	serverConfig     *types.AutoScalerServerConfig
 }
 
