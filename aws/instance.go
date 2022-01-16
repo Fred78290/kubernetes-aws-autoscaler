@@ -269,15 +269,11 @@ func (instance *Ec2Instance) buildNetworkInterfaces(desiredENI *UserDefinedNetwo
 				},
 			}
 
+			// Check if associated with ENI
 			if output, err = instance.client.DescribeNetworkInterfaces(&input); err != nil {
 				if len(output.NetworkInterfaces) > 0 {
 					privateIPAddress = nil
 					desiredENI.NetworkInterfaceID = *output.NetworkInterfaces[0].NetworkInterfaceId
-					desiredENI.SubnetID = *output.NetworkInterfaces[0].SubnetId
-
-					if len(output.NetworkInterfaces[0].Groups) > 0 {
-						desiredENI.SecurityGroupID = *output.NetworkInterfaces[0].Groups[0].GroupId
-					}
 				}
 			}
 		}
@@ -285,16 +281,20 @@ func (instance *Ec2Instance) buildNetworkInterfaces(desiredENI *UserDefinedNetwo
 		if len(desiredENI.NetworkInterfaceID) > 0 {
 			deleteOnTermination = false
 			networkInterfaceId = aws.String(desiredENI.NetworkInterfaceID)
-		} else if len(desiredENI.SubnetID) > 0 {
-			subnetID = aws.String(desiredENI.SubnetID)
 		} else {
-			subnetID = instance.config.Network.ENI[0].GetRandomSubnetsID()
-		}
+			deleteOnTermination = true
 
-		if len(desiredENI.SecurityGroupID) > 0 {
-			securityGroup = aws.String(desiredENI.SecurityGroupID)
-		} else {
-			securityGroup = aws.String(instance.config.Network.ENI[0].SecurityGroupID)
+			if len(desiredENI.SubnetID) > 0 {
+				subnetID = aws.String(desiredENI.SubnetID)
+			} else {
+				subnetID = instance.config.Network.ENI[0].GetRandomSubnetsID()
+			}
+
+			if len(desiredENI.SecurityGroupID) > 0 {
+				securityGroup = aws.String(desiredENI.SecurityGroupID)
+			} else {
+				securityGroup = aws.String(instance.config.Network.ENI[0].SecurityGroupID)
+			}
 		}
 
 		return []*ec2.InstanceNetworkInterfaceSpecification{
