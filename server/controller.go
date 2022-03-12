@@ -226,7 +226,7 @@ func (c *Controller) CreateCRD() error {
 										"allowDeployment": {
 											Type: "boolean",
 										},
-										"InstanceType": {
+										"instanceType": {
 											Type: "string",
 										},
 										"diskSizeInMb": {

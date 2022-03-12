@@ -27,7 +27,7 @@ type ManagedNodeNetwork struct {
 
 // ManagedNodeSpec is the spec for a ManagedNode resource
 type ManagedNodeSpec struct {
-	Nodegroup       string              `default:"vmware-ca-k8s" json:"nodegroup,omitempty"`
+	Nodegroup       string              `default:"aws-ca-k8s" json:"nodegroup,omitempty"`
 	ControlPlane    bool                `json:"controlPlane,omitempty"`
 	AllowDeployment bool                `json:"allowDeployment,omitempty"`
 	InstanceType    string              `default:"t2.micro" json:"instanceType"`
