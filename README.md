@@ -8,7 +8,7 @@ Kubernetes autoscaler for aws
 
 ## How it works
 
-This tool will drive AWS to deploy EC2 instance at the demand. The cluster autoscaler deployment use an enhanced version of cluster-autoscaler. https://github.com/Fred78290/autoscaler. This version use grpc to communicate with the cloud provider hosted outside the pod. A docker image is available here https://hub.docker.com/r/fred78290/cluster-autoscaler
+This tool will drive AWS to deploy EC2 instance at the demand. The cluster autoscaler deployment use an enhanced version of cluster-autoscaler. <https://github.com/Fred78290/autoscaler>. This version use grpc to communicate with the cloud provider hosted outside the pod. A docker image is available here <https://hub.docker.com/r/fred78290/cluster-autoscaler>
 
 A sample of the cluster-autoscaler deployment is available at [examples/cluster-autoscaler.yaml](./examples/cluster-autoscaler.yaml). You must fill value between <>
 
