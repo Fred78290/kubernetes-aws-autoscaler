@@ -1,0 +1,63 @@
+kind: CustomResourceDefinition
+apiVersion: apiextensions.k8s.io/v1
+metadata:
+  name: managednodes.nodemanager.aldunelabs.com
+spec:
+  group: nodemanager.aldunelabs.com
+  names:
+    plural: managednodes
+    singular: managednode
+    shortNames:
+      - mn
+    kind: ManagedNode
+    listKind: ManagedNodeList
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                allowDeployment:
+                  type: boolean
+                annotations:
+                  type: array
+                  items:
+                    type: string
+                controlPlane:
+                  type: boolean
+                diskSizeInGB:
+                  type: integer
+                  default: 10
+                diskType:
+                  type: string
+                eni:
+                  type: object
+                  properties:
+                    networkInterfaceID:
+                      type: string
+                    privateAddress:
+                      type: string
+                    publicIP:
+                      type: boolean
+                    securityGroup:
+                      type: string
+                    subnetID:
+                      type: string
+                instanceType:
+                  type: string
+                labels:
+                  type: array
+                  items:
+                    type: string
+                nodegroup:
+                  type: string
+              x-kubernetes-preserve-unknown-fields: true
+          x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}

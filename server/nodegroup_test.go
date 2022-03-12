@@ -5,9 +5,11 @@ import (
 	"io/ioutil"
 	"testing"
 
+	managednodeClientset "github.com/Fred78290/kubernetes-aws-autoscaler/pkg/generated/clientset/versioned"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/types"
 	"github.com/stretchr/testify/assert"
 	apiv1 "k8s.io/api/core/v1"
+	apiextension "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -15,6 +17,14 @@ type mockupClientGenerator struct {
 }
 
 func (m mockupClientGenerator) KubeClient() (kubernetes.Interface, error) {
+	return nil, nil
+}
+
+func (m mockupClientGenerator) NodeManagerClient() (managednodeClientset.Interface, error) {
+	return nil, nil
+}
+
+func (m mockupClientGenerator) ApiExtentionClient() (apiextension.Interface, error) {
 	return nil, nil
 }
 
@@ -46,6 +56,10 @@ func (m mockupClientGenerator) DrainNode(nodeName string, ignoreDaemonSet, delet
 	return nil
 }
 
+func (m mockupClientGenerator) GetNode(nodeName string) (*apiv1.Node, error) {
+	return nil, nil
+}
+
 func (m mockupClientGenerator) DeleteNode(nodeName string) error {
 	return nil
 }
@@ -55,6 +69,10 @@ func (m mockupClientGenerator) AnnoteNode(nodeName string, annotations map[strin
 }
 
 func (m mockupClientGenerator) LabelNode(nodeName string, labels map[string]string) error {
+	return nil
+}
+
+func (m mockupClientGenerator) TaintNode(nodeName string, taints ...apiv1.Taint) error {
 	return nil
 }
 
@@ -71,13 +89,11 @@ func createTestNode(ng *AutoScalerServerNodeGroup) *AutoScalerServerNode {
 		InstanceType: "t2.small",
 		DiskType:     "gp2",
 		DiskSize:     5120,
-		Addresses: []string{
-			"127.0.0.1",
-		},
-		State:            AutoScalerServerNodeStateNotCreated,
-		AutoProvisionned: true,
-		AwsConfig:        ng.configuration.GetAwsConfiguration(testGroupID),
-		serverConfig:     ng.configuration,
+		IPAddress:    "127.0.0.1",
+		State:        AutoScalerServerNodeStateNotCreated,
+		NodeType:     AutoScalerServerNodeAutoscaled,
+		awsConfig:    ng.configuration.GetAwsConfiguration(testGroupID),
+		serverConfig: ng.configuration,
 	}
 }
 
@@ -100,12 +116,14 @@ func newTestNodeGroup() (*types.AutoScalerServerConfig, *AutoScalerServerNodeGro
 
 	if err == nil {
 		ng := &AutoScalerServerNodeGroup{
-			ServiceIdentifier:   testProviderID,
-			NodeGroupIdentifier: testGroupID,
-			NodeNamePrefix:      "autoscaled",
-			Status:              NodegroupNotCreated,
-			MinNodeSize:         0,
-			MaxNodeSize:         5,
+			ServiceIdentifier:          testProviderID,
+			NodeGroupIdentifier:        testGroupID,
+			ProvisionnedNodeNamePrefix: "autoscaled",
+			ManagedNodeNamePrefix:      "worker",
+			ControlPlaneNamePrefix:     "master",
+			Status:                     NodegroupNotCreated,
+			MinNodeSize:                0,
+			MaxNodeSize:                5,
 			NodeLabels: KubernetesLabel{
 				"monitor":  "true",
 				"database": "true",
@@ -124,11 +142,9 @@ func newTestNodeGroup() (*types.AutoScalerServerConfig, *AutoScalerServerNodeGro
 
 func newTestConfig() (*types.AutoScalerServerConfig, error) {
 	var config types.AutoScalerServerConfig
-	var err error
-	var configStr []byte
 
-	configStr, _ = ioutil.ReadFile("./masterkube/config/config.json")
-	err = json.Unmarshal(configStr, &config)
+	configStr, _ := ioutil.ReadFile("./masterkube/config/config.json")
+	err := json.Unmarshal(configStr, &config)
 
 	if err != nil {
 		return nil, err
@@ -209,7 +225,7 @@ func Test_AutoScalerNodeGroup_addNode(t *testing.T) {
 
 	if assert.NoError(t, err) {
 		t.Run("addNode", func(t *testing.T) {
-			if err := ng.addNodes(kubeClient, 1); err != nil {
+			if _, err := ng.addNodes(kubeClient, 1); err != nil {
 				t.Errorf("AutoScalerServerNodeGroup.addNode() error = %v", err)
 			}
 		})

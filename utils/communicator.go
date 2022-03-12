@@ -99,12 +99,12 @@ func Sudo(connect *types.AutoScalerServerSSH, host string, timeoutInSeconds time
 
 	connection, err := ssh.Dial("tcp", fmt.Sprintf("%s:22", host), sshConfig)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to dial: %s", err)
 	}
 
 	session, err := connection.NewSession()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create session: %s", err)
 	}
 
 	defer session.Close()
@@ -120,16 +120,26 @@ func Sudo(connect *types.AutoScalerServerSSH, host string, timeoutInSeconds time
 	}
 
 	var stdout bytes.Buffer
+	var out []byte
 
 	for _, cmd := range command {
 		glog.Debugf("Shell:%s", cmd)
 
-		if out, err := session.CombinedOutput(fmt.Sprintf("sudo %s", cmd)); err != nil {
-			return "", err
+		if out, err = session.CombinedOutput(fmt.Sprintf("sudo %s", cmd)); err != nil {
+			if out != nil {
+				stdout.Write(out)
+			} else {
+				stdout.Write([]byte(fmt.Sprintf("An error occured during su command: %s, error:%v", cmd, err)))
+			}
+			break
 		} else {
 			stdout.Write(out)
 		}
 	}
 
-	return strings.TrimSpace(stdout.String()), nil
+	if glog.GetLevel() == glog.DebugLevel && err != nil {
+		glog.Debugf("sudo command:%s, output:%s, error:%v", strings.Join(command, ","), stdout.String(), err)
+	}
+
+	return strings.TrimSpace(stdout.String()), err
 }

@@ -2,17 +2,17 @@ package constantes
 
 const (
 	// CloudProviderError is an error related to underlying infrastructure
-	CloudProviderError = "CloudProviderError"
+	CloudProviderError = "cloudProviderError"
 
 	// APICallError is an error related to communication with k8s API server
-	APICallError = "ApiCallError"
+	APICallError = "apiCallError"
 
 	// InternalError is an error inside Cluster Autoscaler
-	InternalError = "InternalError"
+	InternalError = "internalError"
 
 	// TransientError is an error that causes us to skip a single loop, but
 	// does not require any additional action.
-	TransientError = "TransientError"
+	TransientError = "transientError"
 )
 
 const (
@@ -109,6 +109,9 @@ const (
 	// ErrAutoScalerInfoNotFound error msg
 	ErrAutoScalerInfoNotFound = "can't find the VM info from AutoScaler for VM: %s"
 
+	// ErrManagedInfoNotFound error msg
+	ErrManagedNodeNotFound = "can't find the VM info from AutoScaler for UID: %s"
+
 	// ErrKubeAdmJoinFailed error msg
 	ErrKubeAdmJoinFailed = "unable to join the master kubernetes node for VM: %s, reason: %v"
 
@@ -128,16 +131,16 @@ const (
 	ErrDeleteVMFailed = "could not delete VM: %s, reason: %v"
 
 	// ErrUpdateEtcdSslFailed msg
-	ErrUpdateEtcdSslFailed = "could install etcd ssl on VM: %s, reason: %v"
+	ErrUpdateEtcdSslFailed = "could not install etcd ssl on VM: %s, reason: %v"
+
+	// ErrRecopyKubernetesPKIFailed msg
+	ErrRecopyKubernetesPKIFailed = "could not copy kubernetes pki on VM: %s, reason: %v"
 
 	// ErrVMNotFound error msg
 	ErrVMNotFound = "unable to find VM: %s"
 
 	// ErrVMStopFailed error msg
 	ErrVMStopFailed = "unable to stop VM: %s before delete"
-
-	// ErrProviderIDNotConfigured error msg
-	ErrProviderIDNotConfigured = "can't set provider ID for node: %s, reason: %v"
 
 	// ErrPodListReturnError error msg
 	ErrPodListReturnError = "unable to list pods on node %s, reason: %v"
@@ -154,20 +157,20 @@ const (
 	// ErrDrainNodeReturnError error msg
 	ErrDrainNodeReturnError = "drain node: %s got error: %s"
 
+	// ErrGetNodeReturnError error msg
+	ErrGetNodeReturnError = "get node: %s got error: %s"
+
 	// ErrDeleteNodeReturnError error msg
 	ErrDeleteNodeReturnError = "delete node: %s got error: %s"
 
 	// ErrLabelNodeReturnError error msg
 	ErrLabelNodeReturnError = "set labels on node: %s got error: %s"
 
+	// ErrTaintNodeReturnError error msg
+	ErrTaintNodeReturnError = "taint node: %s got error: %s"
+
 	// ErrAnnoteNodeReturnError error msg
 	ErrAnnoteNodeReturnError = "set annotations on node: %s got error: %s"
-
-	// ErrKubeCtlIgnoredError error msg
-	ErrKubeCtlIgnoredError = "kubectl got error on VM: %s, reason: %s"
-
-	// ErrKubeCtlReturnError error msg
-	ErrKubeCtlReturnError = "kubectl got error on VM: %s, %s, reason: %s"
 
 	// ErrNotImplemented error msg
 	ErrNotImplemented = "not implemented"
@@ -184,8 +187,8 @@ const (
 	// ErrMarshallingError error msg
 	ErrMarshallingError = "unable to marshall node: %s as json, reason: %v"
 
-	// ErrKubeletNotConfigured error msg
-	ErrKubeletNotConfigured = "can't set provider ID in kubelet for VM: %s, %s, reason: %v"
+	// ErrProviderIDNotConfigured error msg
+	ErrProviderIDNotConfigured = "can't set provider ID for node: %s, reason: %v"
 
 	// ErrVMNotProvisionnedByMe error msg
 	ErrVMNotProvisionnedByMe = "the VM: %s is not provisionned by me"
