@@ -216,6 +216,7 @@ func (g *AutoScalerServerNodeGroup) addManagedNode(crd *v1alpha1.ManagedNode) (*
 
 	if awsConfig := g.configuration.GetAwsConfiguration(g.NodeGroupIdentifier); awsConfig != nil {
 		var desiredENI *aws.UserDefinedNetworkInterface
+		var instanceType = crd.Spec.InstanceType
 
 		g.RunningNodes[nodeIndex] = ServerNodeStateCreating
 
@@ -223,6 +224,10 @@ func (g *AutoScalerServerNodeGroup) addManagedNode(crd *v1alpha1.ManagedNode) (*
 
 		diskSize := utils.MaxInt(utils.MinInt(crd.Spec.DiskSize, resLimit.GetMaxValue(constantes.ResourceNameManagedNodeDisk, types.ManagedNodeMaxDiskSize)),
 			resLimit.GetMinValue(constantes.ResourceNameManagedNodeDisk, types.ManagedNodeMinDiskSize))
+
+		if len(instanceType) == 0 {
+			instanceType = g.InstanceType
+		}
 
 		if crd.Spec.ENI != nil {
 			eni := crd.Spec.ENI
@@ -241,6 +246,8 @@ func (g *AutoScalerServerNodeGroup) addManagedNode(crd *v1alpha1.ManagedNode) (*
 			ProviderID:       g.providerIDForNode(nodeName),
 			NodeGroupID:      g.NodeGroupIdentifier,
 			NodeName:         nodeName,
+			InstanceName:     nodeName,
+			InstanceType:     instanceType,
 			NodeIndex:        nodeIndex,
 			DiskSize:         diskSize,
 			DiskType:         g.DiskType,
@@ -264,6 +271,8 @@ func (g *AutoScalerServerNodeGroup) addManagedNode(crd *v1alpha1.ManagedNode) (*
 			node.ExtraLabels[constantes.NodeLabelWorkerRole] = ""
 			node.ExtraLabels["worker"] = "true"
 		}
+
+		g.pendingNodes[node.InstanceName] = node
 
 		return node, nil
 	} else {
@@ -316,13 +325,9 @@ func (g *AutoScalerServerNodeGroup) addNodes(c types.ClientGenerator, delta int)
 
 			tempNodes = append(tempNodes, node)
 
-			if g.pendingNodes == nil {
-				g.pendingNodes = make(map[string]*AutoScalerServerNode)
-			}
-
 			g.pendingNodes[node.InstanceName] = node
 		} else {
-			g.pendingNodes = nil
+			g.pendingNodes = make(map[string]*AutoScalerServerNode)
 			return []*AutoScalerServerNode{}, fmt.Errorf("unable to find node group named %s", g.NodeGroupIdentifier)
 		}
 	}
@@ -761,6 +766,8 @@ func (g *AutoScalerServerNodeGroup) nodeName(vmIndex int, controlplane, managed 
 
 	if controlplane {
 		start = 2
+	} else {
+		start = 1
 	}
 
 	for index := start; index <= g.MaxNodeSize; index++ {
@@ -775,7 +782,10 @@ func (g *AutoScalerServerNodeGroup) nodeName(vmIndex int, controlplane, managed 
 		}
 
 		if _, ok := g.Nodes[nodeName]; !ok {
-			return nodeName
+			// Could be in pending node
+			if _, ok = g.pendingNodes[nodeName]; !ok {
+				return nodeName
+			}
 		}
 	}
 
