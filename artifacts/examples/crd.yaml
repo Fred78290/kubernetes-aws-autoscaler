@@ -31,38 +31,32 @@ spec:
                     type: string
                 controlPlane:
                   type: boolean
-                diskSizeInMb:
+                diskSizeInGB:
                   type: integer
-                  default: 10240
+                  default: 10
+                diskType:
+                  type: string
+                eni:
+                  type: object
+                  properties:
+                    networkInterfaceID:
+                      type: string
+                    privateAddress:
+                      type: string
+                    publicIP:
+                      type: boolean
+                    securityGroup:
+                      type: string
+                    subnetID:
+                      type: string
+                instanceType:
+                  type: string
                 labels:
                   type: array
                   items:
                     type: string
-                memorySizeInMb:
-                  type: integer
-                  default: 2048
-                networks:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      address:
-                        type: string
-                      dhcp:
-                        type: boolean
-                      gateway:
-                        type: string
-                      mac-address:
-                        type: string
-                      netmask:
-                        type: string
-                      network:
-                        type: string
                 nodegroup:
                   type: string
-                vcpus:
-                  type: integer
-                  default: 2
               x-kubernetes-preserve-unknown-fields: true
           x-kubernetes-preserve-unknown-fields: true
       subresources:

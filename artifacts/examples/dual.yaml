@@ -1,0 +1,41 @@
+apiVersion: "nodemanager.aldunelabs.com/v1alpha1"
+kind: "ManagedNode"
+metadata:
+  name: "aws-ca-k8s-managed-01"
+spec:
+  nodegroup: aws-ca-k8s
+  controlPlane: false
+  allowDeployment: false
+  instanceType: t3a.medium
+  diskSizeInGB: 10
+  labels:
+  - demo-label.aldunelabs.com=demo
+  - sample-label.aldunelabs.com=sample
+  annotations:
+  - demo-annotation.aldunelabs.com=demo
+  - sample-annotation.aldunelabs.com=sample
+  eni:
+    subnetID: subnet-08978535f23892fc7
+    securityGroup: sg-0b53c559e9ae44086
+    privateAddress: 172.30.64.80
+    publicIP: false
+---
+apiVersion: "nodemanager.aldunelabs.com/v1alpha1"
+kind: "ManagedNode"
+metadata:
+  name: "aws-ca-k8s-managed-02"
+spec:
+  nodegroup: aws-ca-k8s
+  controlPlane: false
+  allowDeployment: false
+  instanceType: t3a.medium
+  diskSizeInGB: 10
+  labels:
+  - demo-label.aldunelabs.com=demo
+  - sample-label.aldunelabs.com=sample
+  annotations:
+  - demo-annotation.aldunelabs.com=demo
+  - sample-annotation.aldunelabs.com=sample
+  eni:
+    subnetID: subnet-00272f4f93f36a142
+    securityGroup: sg-0b53c559e9ae44086
