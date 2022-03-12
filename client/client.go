@@ -11,8 +11,10 @@ import (
 
 	"github.com/Fred78290/kubernetes-aws-autoscaler/constantes"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/context"
+	managednodeClientset "github.com/Fred78290/kubernetes-aws-autoscaler/pkg/generated/clientset/versioned"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/types"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/utils"
+	apiextensionClientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 
 	"github.com/linki/instrumented_http"
 	glog "github.com/sirupsen/logrus"
@@ -30,17 +32,20 @@ import (
 // Default pod eviction settings.
 const (
 	conditionDrainedScheduled = "DrainScheduled"
+	retrySleep                = time.Millisecond * 250
 )
 
 // SingletonClientGenerator provides clients
 type SingletonClientGenerator struct {
-	KubeConfig      string
-	APIServerURL    string
-	RequestTimeout  time.Duration
-	DeletionTimeout time.Duration
-	MaxGracePeriod  time.Duration
-	kubeClient      kubernetes.Interface
-	kubeOnce        sync.Once
+	KubeConfig           string
+	APIServerURL         string
+	RequestTimeout       time.Duration
+	DeletionTimeout      time.Duration
+	MaxGracePeriod       time.Duration
+	kubeClient           kubernetes.Interface
+	nodeManagerClientset managednodeClientset.Interface
+	apiExtensionClient   apiextensionClientset.Interface
+	kubeOnce             sync.Once
 }
 
 // getRestConfig returns the rest clients config to get automatically
@@ -77,12 +82,12 @@ func getRestConfig(kubeConfig, apiServerURL string) (*rest.Config, error) {
 // newKubeClient returns a new Kubernetes client object. It takes a Config and
 // uses APIServerURL and KubeConfig attributes to connect to the cluster. If
 // KubeConfig isn't provided it defaults to using the recommended default.
-func newKubeClient(kubeConfig, apiServerURL string, requestTimeout time.Duration) (*kubernetes.Clientset, error) {
+func newKubeClient(kubeConfig, apiServerURL string, requestTimeout time.Duration) (kubernetes.Interface, managednodeClientset.Interface, apiextensionClientset.Interface, error) {
 	glog.Infof("Instantiating new Kubernetes client")
 
 	config, err := getRestConfig(kubeConfig, apiServerURL)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 
 	config.Timeout = requestTimeout * time.Second
@@ -97,26 +102,57 @@ func newKubeClient(kubeConfig, apiServerURL string, requestTimeout time.Duration
 	}
 
 	client, err := kubernetes.NewForConfig(config)
+
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
+	}
+
+	nodeManagerClientset, err := managednodeClientset.NewForConfig(config)
+
+	if err != nil {
+		return client, nil, nil, err
+	}
+
+	apiExtensionClient, err := apiextensionClientset.NewForConfig(config)
+
+	if err != nil {
+		return client, nodeManagerClientset, nil, err
 	}
 
 	glog.Infof("Created Kubernetes client %s", config.Host)
 
-	return client, nil
+	return client, nodeManagerClientset, apiExtensionClient, err
 }
 
 func (p *SingletonClientGenerator) newRequestContext() *context.Context {
-	return context.NewContext(time.Duration(p.RequestTimeout.Seconds()))
+	return utils.NewRequestContext(p.RequestTimeout)
 }
 
 // KubeClient generates a kube client if it was not created before
 func (p *SingletonClientGenerator) KubeClient() (kubernetes.Interface, error) {
 	var err error
 	p.kubeOnce.Do(func() {
-		p.kubeClient, err = newKubeClient(p.KubeConfig, p.APIServerURL, p.RequestTimeout)
+		p.kubeClient, p.nodeManagerClientset, p.apiExtensionClient, err = newKubeClient(p.KubeConfig, p.APIServerURL, p.RequestTimeout)
 	})
 	return p.kubeClient, err
+}
+
+// NodeManagerClient generates node manager client if it was not created before
+func (p *SingletonClientGenerator) NodeManagerClient() (managednodeClientset.Interface, error) {
+	var err error
+	p.kubeOnce.Do(func() {
+		p.kubeClient, p.nodeManagerClientset, p.apiExtensionClient, err = newKubeClient(p.KubeConfig, p.APIServerURL, p.RequestTimeout)
+	})
+	return p.nodeManagerClientset, err
+}
+
+// ApiExtentionClient generates an api extension client if it was not created before
+func (p *SingletonClientGenerator) ApiExtentionClient() (apiextensionClientset.Interface, error) {
+	var err error
+	p.kubeOnce.Do(func() {
+		p.kubeClient, p.nodeManagerClientset, p.apiExtensionClient, err = newKubeClient(p.KubeConfig, p.APIServerURL, p.RequestTimeout)
+	})
+	return p.apiExtensionClient, err
 }
 
 func (p *SingletonClientGenerator) WaitNodeToBeReady(nodeName string, timeToWaitInSeconds int) error {
@@ -288,29 +324,34 @@ func (p *SingletonClientGenerator) NodeList() (*apiv1.NodeList, error) {
 }
 
 func (p *SingletonClientGenerator) cordonOrUncordonNode(nodeName string, flag bool) error {
-	var node *apiv1.Node
-	kubeclient, err := p.KubeClient()
-
-	if err != nil {
-		return err
-	}
-
 	ctx := p.newRequestContext()
 	defer ctx.Cancel()
 
-	if node, err = kubeclient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{}); err != nil {
-		return err
-	}
+	return wait.PollImmediate(retrySleep, time.Duration(p.RequestTimeout)*time.Second, func() (bool, error) {
+		var node *apiv1.Node
+		kubeclient, err := p.KubeClient()
 
-	if node.Spec.Unschedulable == flag {
-		return nil
-	}
+		if err != nil {
+			return false, err
+		}
 
-	node.Spec.Unschedulable = flag
+		if node, err = kubeclient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{}); err != nil {
+			return false, err
+		}
 
-	_, err = kubeclient.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{})
+		if node.Spec.Unschedulable == flag {
+			return true, nil
+		}
 
-	return err
+		node.Spec.Unschedulable = flag
+
+		if _, err = kubeclient.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{}); err != nil {
+			glog.Warnf("Unschedulable node:%s is not ready, err = %s", nodeName, err)
+			return false, nil
+		}
+
+		return true, nil
+	})
 }
 
 func (p *SingletonClientGenerator) UncordonNode(nodeName string) error {
@@ -322,79 +363,89 @@ func (p *SingletonClientGenerator) CordonNode(nodeName string) error {
 }
 
 func (p *SingletonClientGenerator) SetProviderID(nodeName, providerID string) error {
-	var node *apiv1.Node
-	kubeclient, err := p.KubeClient()
-
-	if err != nil {
-		return err
-	}
-
 	ctx := p.newRequestContext()
 	defer ctx.Cancel()
 
-	if node, err = kubeclient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{}); err != nil {
-		return err
-	}
+	return wait.PollImmediate(retrySleep, time.Duration(p.RequestTimeout)*time.Second, func() (bool, error) {
+		var node *apiv1.Node
+		kubeclient, err := p.KubeClient()
 
-	if node.Spec.ProviderID == providerID {
-		return nil
-	}
+		if err != nil {
+			return false, err
+		}
 
-	node.Spec.ProviderID = providerID
+		if node, err = kubeclient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{}); err != nil {
+			return false, err
+		}
 
-	_, err = kubeclient.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{})
+		if node.Spec.ProviderID == providerID {
+			return true, nil
+		}
 
-	return err
+		node.Spec.ProviderID = providerID
+
+		if _, err = kubeclient.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{}); err != nil {
+			glog.Warnf("Set providerID node:%s is not ready, err = %s", nodeName, err)
+			return false, nil
+		}
+
+		return true, nil
+	})
 }
 
 func (p *SingletonClientGenerator) MarkDrainNode(nodeName string) error {
-	var node *apiv1.Node
-	now := metav1.Time{Time: time.Now()}
-	kubeclient, err := p.KubeClient()
-
-	if err != nil {
-		return err
-	}
-
 	ctx := p.newRequestContext()
 	defer ctx.Cancel()
 
-	if node, err = kubeclient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{}); err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
+	return wait.PollImmediate(retrySleep, time.Duration(p.RequestTimeout)*time.Second, func() (bool, error) {
+		var node *apiv1.Node
+		kubeclient, err := p.KubeClient()
 
-	conditionStatus := apiv1.ConditionTrue
-
-	// Create or update the condition associated to the monitor
-	conditionUpdated := false
-
-	for i, condition := range node.Status.Conditions {
-		if string(condition.Type) == conditionDrainedScheduled {
-			node.Status.Conditions[i].LastHeartbeatTime = now
-			node.Status.Conditions[i].Message = "Drain activity scheduled " + now.Time.Format(time.RFC3339)
-			node.Status.Conditions[i].Status = conditionStatus
-			conditionUpdated = true
-			break
+		if err != nil {
+			return false, err
 		}
-	}
 
-	if !conditionUpdated { // There was no condition found, let's create one
-		node.Status.Conditions = append(node.Status.Conditions,
-			apiv1.NodeCondition{
-				Type:               apiv1.NodeConditionType(conditionDrainedScheduled),
-				Status:             conditionStatus,
-				LastHeartbeatTime:  now,
-				LastTransitionTime: now,
-				Reason:             "Draino",
-				Message:            "Drain activity scheduled " + now.Format(time.RFC3339),
-			},
-		)
-	}
+		now := metav1.Time{Time: time.Now()}
 
-	if _, err = kubeclient.CoreV1().Nodes().UpdateStatus(ctx, node, metav1.UpdateOptions{}); err != nil {
-		return err
-	}
-	return nil
+		if node, err = kubeclient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			return false, err
+		}
+
+		conditionStatus := apiv1.ConditionTrue
+
+		// Create or update the condition associated to the monitor
+		conditionUpdated := false
+
+		for i, condition := range node.Status.Conditions {
+			if string(condition.Type) == conditionDrainedScheduled {
+				node.Status.Conditions[i].LastHeartbeatTime = now
+				node.Status.Conditions[i].Message = "Drain activity scheduled " + now.Time.Format(time.RFC3339)
+				node.Status.Conditions[i].Status = conditionStatus
+				conditionUpdated = true
+				break
+			}
+		}
+
+		if !conditionUpdated { // There was no condition found, let's create one
+			node.Status.Conditions = append(node.Status.Conditions,
+				apiv1.NodeCondition{
+					Type:               apiv1.NodeConditionType(conditionDrainedScheduled),
+					Status:             conditionStatus,
+					LastHeartbeatTime:  now,
+					LastTransitionTime: now,
+					Reason:             "Draino",
+					Message:            "Drain activity scheduled " + now.Format(time.RFC3339),
+				},
+			)
+		}
+
+		if _, err = kubeclient.CoreV1().Nodes().UpdateStatus(ctx, node, metav1.UpdateOptions{}); err != nil {
+			glog.Warnf("Drain node:%s is not ready, err = %s", nodeName, err)
+			return false, nil
+		}
+
+		return true, nil
+	})
 }
 
 func (p *SingletonClientGenerator) DrainNode(nodeName string, ignoreDaemonSet, deleteLocalData bool) error {
@@ -441,6 +492,20 @@ func (p *SingletonClientGenerator) DrainNode(nodeName string, ignoreDaemonSet, d
 	return nil
 }
 
+func (p *SingletonClientGenerator) GetNode(nodeName string) (*apiv1.Node, error) {
+	kubeclient, err := p.KubeClient()
+
+	if err != nil {
+		return nil, err
+	}
+
+	ctx := p.newRequestContext()
+	defer ctx.Cancel()
+
+	return kubeclient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+
+}
+
 func (p *SingletonClientGenerator) DeleteNode(nodeName string) error {
 	kubeclient, err := p.KubeClient()
 
@@ -456,65 +521,130 @@ func (p *SingletonClientGenerator) DeleteNode(nodeName string) error {
 
 // AnnoteNode set annotation on node
 func (p *SingletonClientGenerator) AnnoteNode(nodeName string, annotations map[string]string) error {
-	var nodeInfo *apiv1.Node
-
-	kubeclient, err := p.KubeClient()
-
-	if err != nil {
-		return err
-	}
-
 	ctx := p.newRequestContext()
 	defer ctx.Cancel()
 
-	if nodeInfo, err = kubeclient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{}); err != nil {
-		return err
-	}
+	return wait.PollImmediate(retrySleep, time.Duration(p.RequestTimeout)*time.Second, func() (bool, error) {
+		var nodeInfo *apiv1.Node
 
-	if len(nodeInfo.Annotations) == 0 {
-		nodeInfo.Annotations = annotations
-	} else {
-		for k, v := range annotations {
-			nodeInfo.Annotations[k] = v
+		kubeclient, err := p.KubeClient()
+
+		if err != nil {
+			return false, err
 		}
-	}
 
-	_, err = kubeclient.CoreV1().Nodes().Update(ctx, nodeInfo, metav1.UpdateOptions{})
+		if nodeInfo, err = kubeclient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{}); err != nil {
+			return false, err
+		}
 
-	return err
+		if len(nodeInfo.Annotations) == 0 {
+			nodeInfo.Annotations = annotations
+		} else {
+			for k, v := range annotations {
+				nodeInfo.Annotations[k] = v
+			}
+		}
+
+		if _, err = kubeclient.CoreV1().Nodes().Update(ctx, nodeInfo, metav1.UpdateOptions{}); err != nil {
+			glog.Warnf("Annote node:%s is not ready, err = %s", nodeName, err)
+			return false, nil
+		}
+
+		return true, nil
+	})
 }
 
-// AnnoteNode set annotation on node
+// LabelNode set label on node
 func (p *SingletonClientGenerator) LabelNode(nodeName string, labels map[string]string) error {
-	var nodeInfo *apiv1.Node
-
-	kubeclient, err := p.KubeClient()
-
-	if err != nil {
-		return err
-	}
-
 	ctx := p.newRequestContext()
 	defer ctx.Cancel()
 
-	if nodeInfo, err = kubeclient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{}); err != nil {
-		return err
-	}
+	return wait.PollImmediate(retrySleep, time.Duration(p.RequestTimeout)*time.Second, func() (bool, error) {
+		var nodeInfo *apiv1.Node
+		kubeclient, err := p.KubeClient()
 
-	if len(nodeInfo.Labels) == 0 {
-		nodeInfo.Labels = labels
-	} else {
-		for k, v := range labels {
-			nodeInfo.Labels[k] = v
+		if err != nil {
+			return false, err
+		}
+
+		if nodeInfo, err = kubeclient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{}); err != nil {
+			return false, err
+		}
+
+		if len(nodeInfo.Labels) == 0 {
+			nodeInfo.Labels = labels
+		} else {
+			for k, v := range labels {
+				nodeInfo.Labels[k] = v
+			}
+		}
+
+		if _, err = kubeclient.CoreV1().Nodes().Update(ctx, nodeInfo, metav1.UpdateOptions{}); err != nil {
+			glog.Warnf("Label node:%s is not ready, err = %s", nodeName, err)
+			return false, nil
+		}
+
+		return true, nil
+	})
+}
+
+func containTaint(key string, taints *[]apiv1.Taint) (int, bool) {
+	for i, t := range *taints {
+		if t.Key == key {
+			return i, true
 		}
 	}
 
-	_, err = kubeclient.CoreV1().Nodes().Update(ctx, nodeInfo, metav1.UpdateOptions{})
-
-	return err
+	return -1, false
 }
 
-func NewClientGenerator(cfg *types.Config) *SingletonClientGenerator {
+// TaintNode set annotation on node
+func (p *SingletonClientGenerator) TaintNode(nodeName string, taints ...apiv1.Taint) error {
+	ctx := p.newRequestContext()
+	defer ctx.Cancel()
+
+	return wait.PollImmediate(retrySleep, time.Duration(p.RequestTimeout)*time.Second, func() (bool, error) {
+		var nodeInfo *apiv1.Node
+		kubeclient, err := p.KubeClient()
+
+		if err != nil {
+			return false, err
+		}
+
+		if nodeInfo, err = kubeclient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{}); err != nil {
+			return false, err
+		}
+
+		if nodeInfo.Spec.Taints == nil {
+			nodeInfo.Spec.Taints = taints
+		} else {
+			mergedTaints := make([]apiv1.Taint, 0, len(taints))
+
+			for _, taint := range taints {
+				if index, found := containTaint(taint.Key, &nodeInfo.Spec.Taints); found {
+					// Replace taint
+					nodeInfo.Spec.Taints[index] = taint
+				} else {
+					// Merge it later
+					mergedTaints = append(mergedTaints, taint)
+				}
+			}
+
+			if len(mergedTaints) > 0 {
+				nodeInfo.Spec.Taints = append(nodeInfo.Spec.Taints, mergedTaints...)
+			}
+		}
+
+		if _, err = kubeclient.CoreV1().Nodes().Update(ctx, nodeInfo, metav1.UpdateOptions{}); err != nil {
+			glog.Warnf("Label node:%s is not ready, err = %s", nodeName, err)
+			return false, nil
+		}
+
+		return true, nil
+	})
+}
+
+func NewClientGenerator(cfg *types.Config) types.ClientGenerator {
 	return &SingletonClientGenerator{
 		KubeConfig:      cfg.KubeConfig,
 		APIServerURL:    cfg.APIServerURL,

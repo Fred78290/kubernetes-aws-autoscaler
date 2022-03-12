@@ -1,0 +1,18 @@
+apiVersion: "nodemanager.aldunelabs.com/v1alpha1"
+kind: "ManagedNode"
+metadata:
+  name: "aws-ca-k8s-master-02"
+spec:
+  nodegroup: aws-ca-k8s
+  controlPlane: true
+  allowDeployment: false
+  instanceType: t3a.medium
+  diskSizeInGB: 20
+  labels:
+  - demo-label.aldunelabs.com=demo
+  - sample-label.aldunelabs.com=sample
+  annotations:
+  - demo-annotation.aldunelabs.com=demo
+  - sample-annotation.aldunelabs.com=sample
+  eni:
+    networkInterfaceID: eni-0875ac4cdac6da498
