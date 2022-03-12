@@ -124,7 +124,7 @@ func (eni *NetworkInterface) GetRandomSubnetsID() *string {
 	case reflect.String:
 		str = s.String()
 	case reflect.Slice:
-		str = fmt.Sprintf("%v", s.Index(randomNumberInRange(0, s.Len()-1)))
+		str = fmt.Sprintf("%v", s.Index(randomNumberInRange(0, (s.Len()*2)-1)))
 	}
 
 	if len(str) > 0 {
