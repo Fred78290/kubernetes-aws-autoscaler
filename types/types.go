@@ -375,7 +375,7 @@ func (cfg *Config) ParseFlags(args []string, version string) error {
 
 	app.Flag("min-managednode-disksize", "Managed node: minimum disk size in MB (default: 10MB)").Default(strconv.FormatInt(cfg.ManagedNodeMinDiskSize, 10)).Int64Var(&cfg.ManagedNodeMinDiskSize)
 	app.Flag("max-managednode-disksize", "Managed node: max disk size in MB (default: 1T)").Default(strconv.FormatInt(cfg.ManagedNodeMaxDiskSize, 10)).Int64Var(&cfg.ManagedNodeMaxDiskSize)
-	app.Flag("managednode-disktype", "Managed node: define the disk type MB (default: gp2)").Default(cfg.ManagedNodeDiskType).StringVar(&cfg.ManagedNodeDiskType)
+	app.Flag("managednode-disktype", "Managed node: define the disk type (default: gp2)").Default(cfg.ManagedNodeDiskType).StringVar(&cfg.ManagedNodeDiskType)
 
 	app.Flag("version", "Display version and exit").BoolVar(&cfg.DisplayVersion)
 
