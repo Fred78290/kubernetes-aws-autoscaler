@@ -30,7 +30,7 @@ const (
 	ManagedNodeMaxMemory   = 128 * 1024
 	ManagedNodeMinCores    = 2
 	ManagedNodeMaxCores    = 32
-	ManagedNodeMinDiskSize = 10 * 1024
+	ManagedNodeMinDiskSize = 10
 	ManagedNodeMaxDiskSize = 1024 * 1024
 )
 

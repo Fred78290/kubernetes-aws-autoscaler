@@ -229,10 +229,10 @@ func (c *Controller) CreateCRD() error {
 										"instanceType": {
 											Type: "string",
 										},
-										"diskSizeInMb": {
+										"diskSizeInGB": {
 											Type: "integer",
 											Default: &apiextensionv1.JSON{
-												Raw: []byte("10240"),
+												Raw: []byte("10"),
 											},
 										},
 										"diskType": {
