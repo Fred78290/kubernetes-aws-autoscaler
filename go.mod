@@ -12,11 +12,11 @@ require (
 	golang.org/x/crypto v0.0.0-20211117183948-ae814b36b871
 	google.golang.org/grpc v1.42.0
 	google.golang.org/protobuf v1.27.1
-	k8s.io/api v0.23.4
-	k8s.io/apiextensions-apiserver v0.23.4
-	k8s.io/apimachinery v0.23.4
-	k8s.io/client-go v0.23.4
-	k8s.io/code-generator v0.23.4
+	k8s.io/api v0.23.8
+	k8s.io/apiextensions-apiserver v0.23.8
+	k8s.io/apimachinery v0.23.8
+	k8s.io/client-go v0.23.8
+	k8s.io/code-generator v0.23.8
 )
 
 require (
