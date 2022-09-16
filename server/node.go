@@ -272,7 +272,7 @@ func (vm *AutoScalerServerNode) registerDNS(address string) error {
 	aws := vm.awsConfig
 
 	if aws.Network.ZoneID != nil {
-		err = vm.runningInstance.RegisterDNS(*aws.Network.ZoneID, fmt.Sprintf("%s.%s", vm.InstanceName, *aws.Network.PrivateZoneName), address, false)
+		err = vm.runningInstance.RegisterDNS(aws.GetRoute53AccessKey(), aws.GetRoute53SecretKey(), aws.GetRoute53AccessToken(), aws.GetRoute53Profile(), aws.GetRoute53Region(), *aws.Network.ZoneID, fmt.Sprintf("%s.%s", vm.InstanceName, *aws.Network.PrivateZoneName), address, false)
 	}
 
 	return err
@@ -284,7 +284,7 @@ func (vm *AutoScalerServerNode) unregisterDNS(address string) error {
 	aws := vm.awsConfig
 
 	if aws.Network.ZoneID != nil {
-		err = vm.runningInstance.UnRegisterDNS(*aws.Network.ZoneID, fmt.Sprintf("%s.%s", vm.InstanceName, *aws.Network.PrivateZoneName), address, false)
+		err = vm.runningInstance.UnRegisterDNS(aws.GetRoute53AccessKey(), aws.GetRoute53SecretKey(), aws.GetRoute53AccessToken(), aws.GetRoute53Profile(), aws.GetRoute53Region(), *aws.Network.ZoneID, fmt.Sprintf("%s.%s", vm.InstanceName, *aws.Network.PrivateZoneName), address, false)
 	}
 
 	return err
