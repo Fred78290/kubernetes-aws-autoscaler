@@ -86,25 +86,29 @@ func NewEc2Instance(config *Configuration, instanceName string) (*Ec2Instance, e
 	}
 }
 
-func newSession(conf *Configuration) (*session.Session, error) {
+func newSessionWithOptions(accessKey, secretKey, token, profile, region string) (*session.Session, error) {
 	var cred *credentials.Credentials
 
-	if !isNullOrEmpty(conf.AccessKey) && !isNullOrEmpty(conf.SecretKey) && !isNullOrEmpty(conf.Token) {
-		cred = credentials.NewStaticCredentials(conf.AccessKey, conf.SecretKey, conf.Token)
-	} else if !isNullOrEmpty(conf.AccessKey) && !isNullOrEmpty(conf.SecretKey) {
-		cred = credentials.NewStaticCredentials(conf.AccessKey, conf.SecretKey, "")
-	} else if !isNullOrEmpty(conf.Profile) {
-		cred = credentials.NewSharedCredentials("", conf.Profile)
+	if !isNullOrEmpty(accessKey) && !isNullOrEmpty(secretKey) && !isNullOrEmpty(token) {
+		cred = credentials.NewStaticCredentials(accessKey, secretKey, token)
+	} else if !isNullOrEmpty(accessKey) && !isNullOrEmpty(secretKey) {
+		cred = credentials.NewStaticCredentials(accessKey, secretKey, "")
+	} else if !isNullOrEmpty(profile) {
+		cred = credentials.NewSharedCredentials("", profile)
 	} else {
 		cred = nil
 	}
 
 	config := aws.Config{
 		Credentials: cred,
-		Region:      aws.String(conf.Region),
+		Region:      aws.String(region),
 	}
 
 	return session.NewSession(&config)
+}
+
+func newSession(conf *Configuration) (*session.Session, error) {
+	return newSessionWithOptions(conf.AccessKey, conf.SecretKey, conf.Token, conf.Profile, conf.Region)
 }
 
 func createClient(conf *Configuration) (*ec2.EC2, error) {
@@ -564,10 +568,10 @@ func (instance *Ec2Instance) Status() (*Status, error) {
 	}
 }
 
-func (instance *Ec2Instance) changeResourceRecordSetsInput(cmd, zoneID, name, address string, wait bool) error {
+func (instance *Ec2Instance) changeResourceRecordSetsInput(cmd, accessKey, secretKey, accessToken, profile, region, zoneID, name, address string, wait bool) error {
 	var svc *route53.Route53
 
-	if session, e := session.NewSession(); e != nil {
+	if session, e := newSessionWithOptions(accessKey, secretKey, accessToken, profile, region); e != nil {
 		return e
 	} else {
 		svc = route53.New(session)
@@ -628,11 +632,11 @@ func (instance *Ec2Instance) changeResourceRecordSetsInput(cmd, zoneID, name, ad
 }
 
 // RegisterDNS register EC2 instance in Route53
-func (instance *Ec2Instance) RegisterDNS(zoneID, name, address string, wait bool) error {
-	return instance.changeResourceRecordSetsInput("UPSERT", zoneID, name, address, wait)
+func (instance *Ec2Instance) RegisterDNS(accessKey, secretKey, accessToken, profile, region, zoneID, name, address string, wait bool) error {
+	return instance.changeResourceRecordSetsInput("UPSERT", accessKey, secretKey, accessToken, profile, region, zoneID, name, address, wait)
 }
 
 // UnRegisterDNS unregister EC2 instance in Route53
-func (instance *Ec2Instance) UnRegisterDNS(zoneID, name, address string, wait bool) error {
-	return instance.changeResourceRecordSetsInput("DELETE", zoneID, name, address, wait)
+func (instance *Ec2Instance) UnRegisterDNS(accessKey, secretKey, accessToken, profile, region, zoneID, name, address string, wait bool) error {
+	return instance.changeResourceRecordSetsInput("DELETE", accessKey, secretKey, accessToken, profile, region, zoneID, name, address, wait)
 }
