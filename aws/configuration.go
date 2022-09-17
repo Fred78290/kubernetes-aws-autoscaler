@@ -53,6 +53,11 @@ type Tag struct {
 type Network struct {
 	ZoneID          *string            `json:"route53"`
 	PrivateZoneName *string            `json:"privateZoneName"`
+	AccessKey       *string            `json:"accessKey"`
+	SecretKey       *string            `json:"secretKey"`
+	Token           *string            `json:"token"`
+	Profile         *string            `json:"profile"`
+	Region          *string            `json:"region"`
 	ENI             []NetworkInterface `json:"eni"`
 }
 
@@ -142,6 +147,51 @@ func (conf *Configuration) Log(args ...interface{}) {
 // GetInstanceID return aws instance id from named ec2 instance
 func (conf *Configuration) GetInstanceID(name string) (*Ec2Instance, error) {
 	return GetEc2Instance(conf, name)
+}
+
+// GetRoute53AccessKey return route53 access key or default
+func (conf *Configuration) GetRoute53AccessKey() string {
+	if conf.Network.AccessKey != nil && *conf.Network.AccessKey != "" {
+		return *conf.Network.AccessKey
+	}
+
+	return conf.AccessKey
+}
+
+// GetRoute53SecretKey return route53 secret key or default
+func (conf *Configuration) GetRoute53SecretKey() string {
+	if conf.Network.SecretKey != nil && *conf.Network.SecretKey != "" {
+		return *conf.Network.SecretKey
+	}
+
+	return conf.SecretKey
+}
+
+// GetRoute53AccessToken return route53 token or default
+func (conf *Configuration) GetRoute53AccessToken() string {
+	if conf.Network.Token != nil && *conf.Network.Token != "" {
+		return *conf.Network.Token
+	}
+
+	return conf.Token
+}
+
+// GetRoute53Profile return route53 profile or default
+func (conf *Configuration) GetRoute53Profile() string {
+	if conf.Network.Profile != nil && *conf.Network.Profile != "" {
+		return *conf.Network.Profile
+	}
+
+	return conf.Profile
+}
+
+// GetRoute53Profile return route53 region or default
+func (conf *Configuration) GetRoute53Region() string {
+	if conf.Network.Region != nil && *conf.Network.Region != "" {
+		return *conf.Network.Region
+	}
+
+	return conf.Region
 }
 
 // Create will create a named VM not powered
