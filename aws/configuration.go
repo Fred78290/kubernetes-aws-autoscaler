@@ -123,7 +123,13 @@ func Copy(dst interface{}, src interface{}) error {
 }
 
 func (eni *NetworkInterface) GetRandomSubnetsID() string {
-	index := randomNumberInRange(0, len(eni.SubnetsID)-1)
+	numOfEnis := len(eni.SubnetsID)
+
+	if numOfEnis == 1 {
+		return eni.SubnetsID[0]
+	}
+
+	index := randomNumberInRange(0, numOfEnis-1)
 
 	return eni.SubnetsID[index]
 }
