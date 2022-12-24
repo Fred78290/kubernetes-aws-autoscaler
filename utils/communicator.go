@@ -62,6 +62,10 @@ func Shell(args ...string) error {
 
 // Scp copy file
 func Scp(connect *types.AutoScalerServerSSH, host, src, dst string) error {
+	if connect.TestMode {
+		return nil
+	}
+
 	return Shell("scp",
 		"-i", connect.GetAuthKeys(),
 		"-o", "StrictHostKeyChecking=no",
@@ -74,6 +78,11 @@ func Scp(connect *types.AutoScalerServerSSH, host, src, dst string) error {
 
 // Sudo exec ssh command as sudo
 func Sudo(connect *types.AutoScalerServerSSH, host string, timeoutInSeconds time.Duration, command ...string) (string, error) {
+
+	if connect.TestMode {
+		return "", nil
+	}
+
 	var sshConfig *ssh.ClientConfig
 	var err error
 
