@@ -1,0 +1,96 @@
+name: build-vsphere-autoscaler
+on:
+  push:
+    branches:
+      - '*'
+    tags:
+      - '!*'
+
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+env:
+  REGISTRY: ${{ secrets.REGISTRY }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  AWS_ACCESSKEY: ${{ secrets.AWS_ACCESSKEY }}
+  AWS_PROFILE: ${{ secrets.AWS_PROFILE }}
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_SECRETKEY: ${{ secrets.AWS_SECRETKEY }}
+  IAM_ROLE_ARN: ${{ secrets.IAM_ROLE_ARN }}
+  PRIVATE_DOMAIN_NAME: ${{ secrets.PRIVATE_DOMAIN_NAME }}
+  ROUTE53_ZONEID: ${{ secrets.ROUTE53_ZONEID }}
+  SEED_IMAGE: ${{ secrets.SEED_IMAGE }}
+  SEED_USER: ${{ secrets.SEED_USER }}
+  SSH_KEYNAME: ${{ secrets.SSH_KEYNAME }}
+  SSH_PRIVATEKEY: ${{ secrets.SSH_PRIVATEKEY }}
+  VPC_SECURITY_GROUPID: ${{ secrets.VPC_SECURITY_GROUPID }}
+  VPC_SUBNET_ID: ${{ secrets.VPC_SUBNET_ID }}
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Cache vendor
+        uses: actions/cache@v3
+        env:
+          cache-name: cache-vendor
+        with:
+          path: vendor
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-
+
+      - name:  Setup Go environment
+        uses: actions/setup-go@v3
+        with:
+          go-version: 1.19
+
+      - name: Build binary
+        shell: bash
+        run: |
+          make -e REGISTRY=$REGISTRY -e TAG=build-ci build-in-docker
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Cache vendor
+        uses: actions/cache@v3
+        env:
+          cache-name: cache-vendor
+        with:
+          path: vendor
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-
+
+      - name: test-in-docker
+        shell: bash
+        run: |
+          make -e REGISTRY=$REGISTRY -e TAG=test-ci test-in-docker
+
+  sonarcloud:
+    name: SonarCloud
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@v1.8
+
+      - name: Prepare SonarCloud
+        shell: bash
+        run: sudo chown -R $USER .scannerwork

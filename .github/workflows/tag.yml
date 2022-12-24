@@ -1,0 +1,89 @@
+name: deploy-vsphere-autoscaler
+
+on:
+  push:
+    tags:
+      - v*
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  REGISTRY: ${{ secrets.REGISTRY }}
+  AWS_ACCESSKEY: ${{ secrets.AWS_ACCESSKEY }}
+  AWS_PROFILE: ${{ secrets.AWS_PROFILE }}
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_SECRETKEY: ${{ secrets.AWS_SECRETKEY }}
+  IAM_ROLE_ARN: ${{ secrets.IAM_ROLE_ARN }}
+  PRIVATE_DOMAIN_NAME: ${{ secrets.PRIVATE_DOMAIN_NAME }}
+  ROUTE53_ZONEID: ${{ secrets.ROUTE53_ZONEID }}
+  SEED_IMAGE: ${{ secrets.SEED_IMAGE }}
+  SEED_USER: ${{ secrets.SEED_USER }}
+  SSH_KEYNAME: ${{ secrets.SSH_KEYNAME }}
+  SSH_PRIVATEKEY: ${{ secrets.SSH_PRIVATEKEY }}
+  VPC_SECURITY_GROUPID: ${{ secrets.VPC_SECURITY_GROUPID }}
+  VPC_SUBNET_ID: ${{ secrets.VPC_SUBNET_ID }}
+
+jobs:
+  deploy:
+    if: startsWith(github.ref, 'refs/tags/v')
+    name: Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Cache vendor
+        uses: actions/cache@v3.0.11
+        env:
+          cache-name: cache-vendor
+        with:
+          path: vendor
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-
+
+      - name:  Setup Go environment
+        uses:  actions/setup-go@v3
+        with:
+          go-version: 1.19
+
+      - name: Test
+        shell: bash
+        run: |
+          IMAGE_TAG=${GITHUB_REF#refs/tags/}
+          make -e REGISTRY=$REGISTRY -e TAG="${IMAGE_TAG}" test-in-docker
+
+      - name: Prepare docker buildx
+        id: prep
+        shell: bash
+        run: |
+          IMAGE_TAG=${GITHUB_REF#refs/tags/}
+          echo "tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          docker buildx version;
+          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin;
+          docker context create builders
+
+      - name: Setup docker buildx
+        uses: docker/setup-buildx-action@v2.2.1
+        with:
+          version: latest
+          endpoint: builders
+          use: true
+
+      - name: Build docker image
+        id: build
+        shell: bash
+        run: |
+          IMAGE_TAG=${GITHUB_REF#refs/tags/}
+          make -e REGISTRY=$REGISTRY -e TAG="${IMAGE_TAG}" container-push-manifest
+          sudo chown -R $USER out vendor
+          cp out/linux/amd64/aws-autoscaler aws-autoscaler-amd64
+          cp out/linux/arm64/aws-autoscaler aws-autoscaler-arm64
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.prep.outputs.tag }}
+          draft: false
+          files: |
+            aws-autoscaler-amd64
+            aws-autoscaler-arm64
