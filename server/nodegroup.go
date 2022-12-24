@@ -35,9 +35,6 @@ const (
 	NodegroupDeleted
 )
 
-// KubernetesLabel labels
-type KubernetesLabel map[string]string
-
 type ServerNodeState int
 
 const (
@@ -63,11 +60,11 @@ type AutoScalerServerNodeGroup struct {
 	MinNodeSize                int                              `json:"minSize"`
 	MaxNodeSize                int                              `json:"maxSize"`
 	Nodes                      map[string]*AutoScalerServerNode `json:"nodes"`
-	NodeLabels                 KubernetesLabel                  `json:"nodeLabels"`
-	SystemLabels               KubernetesLabel                  `json:"systemLabels"`
+	NodeLabels                 types.KubernetesLabel            `json:"nodeLabels"`
+	SystemLabels               types.KubernetesLabel            `json:"systemLabels"`
 	AutoProvision              bool                             `json:"auto-provision"`
 	LastCreatedNodeIndex       int                              `json:"node-index"`
-	RunningNodes               map[int]ServerNodeState          `json:"running-nodes"`
+	RunningNodes               map[int]ServerNodeState          `json:"running-nodes-state"`
 	pendingNodes               map[string]*AutoScalerServerNode
 	pendingNodesWG             sync.WaitGroup
 	numOfControlPlanes         int
@@ -77,8 +74,8 @@ type AutoScalerServerNodeGroup struct {
 	configuration              *types.AutoScalerServerConfig
 }
 
-func CreateLabelOrAnnotation(values []string) KubernetesLabel {
-	result := KubernetesLabel{}
+func CreateLabelOrAnnotation(values []string) types.KubernetesLabel {
+	result := types.KubernetesLabel{}
 
 	for _, value := range values {
 		if len(value) > 0 {
@@ -243,7 +240,6 @@ func (g *AutoScalerServerNodeGroup) addManagedNode(crd *v1alpha1.ManagedNode) (*
 		}
 
 		node := &AutoScalerServerNode{
-			ProviderID:       g.providerIDForNode(nodeName),
 			NodeGroupID:      g.NodeGroupIdentifier,
 			NodeName:         nodeName,
 			InstanceName:     nodeName,
@@ -256,7 +252,7 @@ func (g *AutoScalerServerNodeGroup) addManagedNode(crd *v1alpha1.ManagedNode) (*
 			AllowDeployment:  crd.Spec.AllowDeployment,
 			ExtraLabels:      CreateLabelOrAnnotation(crd.Spec.Labels),
 			ExtraAnnotations: CreateLabelOrAnnotation(crd.Spec.Annotations),
-			UID:              crd.GetUID(),
+			CRDUID:           crd.GetUID(),
 			awsConfig:        awsConfig,
 			serverConfig:     g.configuration,
 			desiredENI:       desiredENI,
@@ -299,14 +295,13 @@ func (g *AutoScalerServerNodeGroup) addNodes(c types.ClientGenerator, delta int)
 
 			g.RunningNodes[nodeIndex] = ServerNodeStateCreating
 
-			extraAnnotations := KubernetesLabel{}
-			extraLabels := KubernetesLabel{
+			extraAnnotations := types.KubernetesLabel{}
+			extraLabels := types.KubernetesLabel{
 				constantes.NodeLabelWorkerRole: "",
 				"worker":                       "true",
 			}
 
 			node := &AutoScalerServerNode{
-				ProviderID:       g.providerIDForNode(nodeName),
 				NodeGroupID:      g.NodeGroupIdentifier,
 				InstanceName:     nodeName,
 				NodeName:         nodeName,
@@ -525,7 +520,6 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(client types.ClientGenera
 	var lastNodeIndex = 0
 	var ec2Instance *aws.Ec2Instance
 	var nodeInfos *apiv1.NodeList
-	var out string
 	var err error
 
 	if nodeInfos, err = client.NodeList(); err != nil {
@@ -546,13 +540,10 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(client types.ClientGenera
 	awsConfig := g.configuration.GetAwsConfiguration(g.NodeGroupIdentifier)
 
 	for _, nodeInfo := range nodeInfos.Items {
-		var providerID = utils.GetNodeProviderID(g.ServiceIdentifier, &nodeInfo)
-		var instanceName string
-		var nodeType AutoScalerServerNodeType
-		var UID uid.UID
-
-		if len(providerID) > 0 {
-			out, _ = utils.NodeGroupIDFromProviderID(g.ServiceIdentifier, providerID)
+		if nodegroupName, found := nodeInfo.Annotations[constantes.AnnotationNodeGroupName]; found {
+			var instanceName string
+			var nodeType AutoScalerServerNodeType
+			var UID uid.UID
 
 			autoProvisionned, _ := strconv.ParseBool(nodeInfo.Annotations[constantes.AnnotationNodeAutoProvisionned])
 			managedNode, _ := strconv.ParseBool(nodeInfo.Annotations[constantes.AnnotationNodeManaged])
@@ -573,10 +564,10 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(client types.ClientGenera
 			}
 
 			// Ignore nodes not handled by autoscaler if option includeExistingNode == false
-			if out == g.NodeGroupIdentifier && (autoProvisionned || includeExistingNode) {
-				glog.Infof("Discover node:%s matching nodegroup:%s", providerID, g.NodeGroupIdentifier)
+			if nodegroupName == g.NodeGroupIdentifier && (autoProvisionned || includeExistingNode) {
+				glog.Infof("Discover node:%s matching nodegroup:%s", nodeInfo.Name, g.NodeGroupIdentifier)
 
-				if instanceName, err = utils.NodeNameFromProviderID(g.ServiceIdentifier, providerID); err == nil {
+				if instanceName, found = nodeInfo.Annotations[constantes.AnnotationInstanceName]; found {
 					node := formerNodes[instanceName]
 					runningIP := ""
 
@@ -607,14 +598,13 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(client types.ClientGenera
 							glog.Infof("Add node:%s with IP:%s to nodegroup:%s", instanceName, runningIP, g.NodeGroupIdentifier)
 
 							node = &AutoScalerServerNode{
-								ProviderID:       providerID,
 								NodeGroupID:      g.NodeGroupIdentifier,
 								InstanceName:     instanceName,
 								NodeName:         nodeInfo.Name,
 								NodeIndex:        lastNodeIndex,
 								State:            AutoScalerServerNodeStateRunning,
 								NodeType:         nodeType,
-								UID:              UID,
+								CRDUID:           UID,
 								ControlPlaneNode: controlPlane,
 								AllowDeployment:  g.nodeAllowDeployment(&nodeInfo),
 								CPU:              int(nodeInfo.Status.Capacity.Cpu().Value()),
@@ -628,7 +618,7 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(client types.ClientGenera
 
 							err = client.AnnoteNode(nodeInfo.Name, map[string]string{
 								constantes.AnnotationScaleDownDisabled:    strconv.FormatBool(nodeType != AutoScalerServerNodeAutoscaled),
-								constantes.NodeLabelGroupName:             g.NodeGroupIdentifier,
+								constantes.AnnotationNodeGroupName:        g.NodeGroupIdentifier,
 								constantes.AnnotationInstanceName:         instanceName,
 								constantes.AnnotationInstanceID:           *ec2Instance.InstanceID,
 								constantes.AnnotationNodeAutoProvisionned: strconv.FormatBool(autoProvisionned),
@@ -641,7 +631,7 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(client types.ClientGenera
 							}
 
 							err = client.LabelNode(nodeInfo.Name, map[string]string{
-								constantes.NodeLabelGroupName: g.NodeGroupIdentifier,
+								constantes.AnnotationNodeGroupName: g.NodeGroupIdentifier,
 							})
 
 							if err != nil {
@@ -799,17 +789,9 @@ func (g *AutoScalerServerNodeGroup) nodeName(vmIndex int, controlplane, managed 
 	}
 }
 
-func (g *AutoScalerServerNodeGroup) providerID() string {
-	return fmt.Sprintf("%s://%s/object?type=group", g.ServiceIdentifier, g.NodeGroupIdentifier)
-}
-
-func (g *AutoScalerServerNodeGroup) providerIDForNode(nodeName string) string {
-	return fmt.Sprintf("%s://%s/object?type=node&name=%s", g.ServiceIdentifier, g.NodeGroupIdentifier, nodeName)
-}
-
-func (g *AutoScalerServerNodeGroup) findNodeByUID(uid uid.UID) (*AutoScalerServerNode, error) {
+func (g *AutoScalerServerNodeGroup) findNodeByCRDUID(uid uid.UID) (*AutoScalerServerNode, error) {
 	for _, node := range g.Nodes {
-		if node.UID == uid {
+		if node.CRDUID == uid {
 			return node, nil
 		}
 	}

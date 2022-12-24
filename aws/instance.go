@@ -2,6 +2,9 @@ package aws
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -23,8 +26,12 @@ type Ec2Instance struct {
 	config       *Configuration
 	InstanceName string
 	InstanceID   *string
+	Region       *string
+	Zone         *string
 	AddressIP    *string
 }
+
+var phEC2Client *ec2.EC2
 
 // GetEc2Instance return an existing instance from name
 func GetEc2Instance(config *Configuration, instanceName string) (*Ec2Instance, error) {
@@ -64,6 +71,8 @@ func GetEc2Instance(config *Configuration, instanceName string) (*Ec2Instance, e
 						config:       config,
 						InstanceName: instanceName,
 						InstanceID:   instance.InstanceId,
+						Region:       &config.Region,
+						Zone:         instance.Placement.AvailabilityZone,
 					}, nil
 				}
 			}
@@ -71,6 +80,15 @@ func GetEc2Instance(config *Configuration, instanceName string) (*Ec2Instance, e
 
 		return nil, fmt.Errorf(constantes.ErrVMNotFound, instanceName)
 	}
+}
+
+func userHomeDir() string {
+	if runtime.GOOS == "windows" { // Windows
+		return os.Getenv("USERPROFILE")
+	}
+
+	// *nix
+	return os.Getenv("HOME")
 }
 
 // NewEc2Instance create a new instance
@@ -86,15 +104,35 @@ func NewEc2Instance(config *Configuration, instanceName string) (*Ec2Instance, e
 	}
 }
 
-func newSessionWithOptions(accessKey, secretKey, token, profile, region string) (*session.Session, error) {
+func credentialsFileExists(filename string) bool {
+	if isNullOrEmpty(filename) {
+		if filename = os.Getenv("AWS_SHARED_CREDENTIALS_FILE"); isNullOrEmpty(filename) {
+			filename = filepath.Join(userHomeDir(), ".aws", "credentials")
+		}
+	}
+
+	if _, err := os.Stat(filename); err != nil {
+		return false
+	}
+
+	return true
+}
+
+func isAwsProfileValid(filename, profile string) bool {
+	if isNullOrEmpty(profile) {
+		return false
+	}
+
+	return credentialsFileExists(filename)
+}
+
+func newSessionWithOptions(accessKey, secretKey, token, filename, profile, region string) (*session.Session, error) {
 	var cred *credentials.Credentials
 
-	if !isNullOrEmpty(accessKey) && !isNullOrEmpty(secretKey) && !isNullOrEmpty(token) {
-		cred = credentials.NewStaticCredentials(accessKey, secretKey, token)
+	if isAwsProfileValid(filename, profile) {
+		cred = credentials.NewSharedCredentials(filename, profile)
 	} else if !isNullOrEmpty(accessKey) && !isNullOrEmpty(secretKey) {
-		cred = credentials.NewStaticCredentials(accessKey, secretKey, "")
-	} else if !isNullOrEmpty(profile) {
-		cred = credentials.NewSharedCredentials("", profile)
+		cred = credentials.NewStaticCredentials(accessKey, secretKey, token)
 	} else {
 		cred = nil
 	}
@@ -108,27 +146,27 @@ func newSessionWithOptions(accessKey, secretKey, token, profile, region string) 
 }
 
 func newSession(conf *Configuration) (*session.Session, error) {
-	return newSessionWithOptions(conf.AccessKey, conf.SecretKey, conf.Token, conf.Profile, conf.Region)
+	return newSessionWithOptions(conf.AccessKey, conf.SecretKey, conf.Token, conf.Filename, conf.Profile, conf.Region)
 }
 
 func createClient(conf *Configuration) (*ec2.EC2, error) {
-	var err error
-	var sess *session.Session
+	if phEC2Client == nil {
+		var err error
+		var sess *session.Session
 
-	if sess, err = newSession(conf); err != nil {
-		return nil, err
+		if sess, err = newSession(conf); err != nil {
+			return nil, err
+		}
+
+		// Create EC2 service client
+		if glog.GetLevel() >= glog.DebugLevel {
+			phEC2Client = ec2.New(sess, aws.NewConfig().WithLogger(conf).WithLogLevel(aws.LogDebugWithHTTPBody).WithLogLevel(aws.LogDebugWithSigning))
+		} else {
+			phEC2Client = ec2.New(sess)
+		}
 	}
 
-	var client *ec2.EC2
-
-	// Create EC2 service client
-	if glog.GetLevel() >= glog.DebugLevel {
-		client = ec2.New(sess, aws.NewConfig().WithLogger(conf).WithLogLevel(aws.LogDebugWithHTTPBody).WithLogLevel(aws.LogDebugWithSigning))
-	} else {
-		client = ec2.New(sess)
-	}
-
-	return client, nil
+	return phEC2Client, nil
 }
 
 func (instance *Ec2Instance) getInstanceID() string {
@@ -291,7 +329,7 @@ func (instance *Ec2Instance) buildNetworkInterfaces(desiredENI *UserDefinedNetwo
 			if len(desiredENI.SubnetID) > 0 {
 				subnetID = aws.String(desiredENI.SubnetID)
 			} else {
-				subnetID = instance.config.Network.ENI[0].GetRandomSubnetsID()
+				subnetID = aws.String(instance.config.Network.ENI[0].GetRandomSubnetsID())
 			}
 
 			if len(desiredENI.SecurityGroupID) > 0 {
@@ -325,7 +363,7 @@ func (instance *Ec2Instance) buildNetworkInterfaces(desiredENI *UserDefinedNetwo
 				DeleteOnTermination:      aws.Bool(true),
 				Description:              aws.String(instance.InstanceName),
 				DeviceIndex:              aws.Int64(int64(index)),
-				SubnetId:                 eni.GetRandomSubnetsID(),
+				SubnetId:                 aws.String(eni.GetRandomSubnetsID()),
 				Groups: []*string{
 					aws.String(eni.SecurityGroupID),
 				},
@@ -458,6 +496,8 @@ func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType strin
 		return err
 	}
 
+	instance.Region = aws.String(instance.config.Region)
+	instance.Zone = result.Instances[0].Placement.AvailabilityZone
 	instance.InstanceID = result.Instances[0].InstanceId
 
 	return nil
@@ -568,10 +608,10 @@ func (instance *Ec2Instance) Status() (*Status, error) {
 	}
 }
 
-func (instance *Ec2Instance) changeResourceRecordSetsInput(cmd, accessKey, secretKey, accessToken, profile, region, zoneID, name, address string, wait bool) error {
+func (instance *Ec2Instance) changeResourceRecordSetsInput(conf *Configuration, cmd, name, address string, wait bool) error {
 	var svc *route53.Route53
 
-	if session, e := newSessionWithOptions(accessKey, secretKey, accessToken, profile, region); e != nil {
+	if session, e := newSessionWithOptions(conf.GetRoute53AccessKey(), conf.GetRoute53SecretKey(), conf.GetRoute53AccessToken(), conf.GetFileName(), conf.GetRoute53Profile(), conf.GetRoute53Region()); e != nil {
 		return e
 	} else {
 		svc = route53.New(session)
@@ -595,10 +635,11 @@ func (instance *Ec2Instance) changeResourceRecordSetsInput(cmd, accessKey, secre
 				},
 				Comment: aws.String("Kubernetes worker node"),
 			},
-			HostedZoneId: aws.String(zoneID),
+			HostedZoneId: aws.String(conf.Network.ZoneID),
 		}
 
 		result, err := svc.ChangeResourceRecordSets(input)
+
 		if err != nil {
 			if aerr, ok := err.(awserr.Error); ok {
 				switch aerr.Code() {
@@ -632,11 +673,11 @@ func (instance *Ec2Instance) changeResourceRecordSetsInput(cmd, accessKey, secre
 }
 
 // RegisterDNS register EC2 instance in Route53
-func (instance *Ec2Instance) RegisterDNS(accessKey, secretKey, accessToken, profile, region, zoneID, name, address string, wait bool) error {
-	return instance.changeResourceRecordSetsInput("UPSERT", accessKey, secretKey, accessToken, profile, region, zoneID, name, address, wait)
+func (instance *Ec2Instance) RegisterDNS(conf *Configuration, name, address string, wait bool) error {
+	return instance.changeResourceRecordSetsInput(conf, "UPSERT", name, address, wait)
 }
 
 // UnRegisterDNS unregister EC2 instance in Route53
-func (instance *Ec2Instance) UnRegisterDNS(accessKey, secretKey, accessToken, profile, region, zoneID, name, address string, wait bool) error {
-	return instance.changeResourceRecordSetsInput("DELETE", accessKey, secretKey, accessToken, profile, region, zoneID, name, address, wait)
+func (instance *Ec2Instance) UnRegisterDNS(conf *Configuration, name, address string, wait bool) error {
+	return instance.changeResourceRecordSetsInput(conf, "DELETE", name, address, wait)
 }
