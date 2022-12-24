@@ -3,7 +3,7 @@ package utils
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -15,7 +15,7 @@ import (
 
 // AuthMethodFromPrivateKeyFile read public key
 func AuthMethodFromPrivateKeyFile(file string) ssh.AuthMethod {
-	if buffer, err := ioutil.ReadFile(file); err == nil {
+	if buffer, err := os.ReadFile(file); err == nil {
 		if key, err := ssh.ParsePrivateKey(buffer); err == nil {
 			return ssh.PublicKeys(key)
 		} else {
