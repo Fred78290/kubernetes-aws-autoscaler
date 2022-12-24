@@ -357,7 +357,7 @@ func (s *AutoScalerServerApp) NodeGroupForNode(ctx context.Context, request *api
 			},
 		}, nil
 	} else {
-		glog.Debug("Node annotation[%s] is empty", constantes.AnnotationNodeGroupName)
+		glog.Infof("Node annotation[%s] is empty", constantes.AnnotationNodeGroupName)
 
 		return &apigrpc.NodeGroupForNodeReply{
 			Response: &apigrpc.NodeGroupForNodeReply_NodeGroup{
