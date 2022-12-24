@@ -89,7 +89,7 @@ func (s *AutoScalerServerApp) newNodeGroup(nodeGroupID string, minNodeSize, maxN
 		return nil, fmt.Errorf(constantes.ErrNodeGroupAlreadyExists, nodeGroupID)
 	}
 
-	glog.Infof("New node group, ID:%s minSize:%d, maxSize:%d, machineType:%s, node lables:%v, %v", nodeGroupID, minNodeSize, maxNodeSize, machineType, labels, systemLabels)
+	glog.Infof("New node group, ID:%s minSize:%d, maxSize:%d, machineType:%s, node labels:%v, %v", nodeGroupID, minNodeSize, maxNodeSize, machineType, labels, systemLabels)
 
 	nodeGroup := &AutoScalerServerNodeGroup{
 		ServiceIdentifier:          s.configuration.ServiceIdentifier,
