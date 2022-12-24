@@ -66,6 +66,14 @@ func GetEc2Instance(config *Configuration, instanceName string) (*Ec2Instance, e
 			for _, instance := range reservation.Instances {
 				// Assume EC2 shutting-down is terminated after
 				if *instance.State.Code != 48 && *instance.State.Code != 32 {
+					var address *string
+
+					if instance.PublicIpAddress != nil {
+						address = instance.PublicIpAddress
+					} else {
+						address = instance.PrivateIpAddress
+					}
+
 					return &Ec2Instance{
 						client:       client,
 						config:       config,
@@ -73,6 +81,7 @@ func GetEc2Instance(config *Configuration, instanceName string) (*Ec2Instance, e
 						InstanceID:   instance.InstanceId,
 						Region:       &config.Region,
 						Zone:         instance.Placement.AvailabilityZone,
+						AddressIP:    address,
 					}, nil
 				}
 			}
