@@ -1,4 +1,4 @@
-name: deploy-vsphere-autoscaler
+name: deploy-aws-autoscaler
 
 on:
   push:
@@ -49,8 +49,7 @@ jobs:
       - name: Test
         shell: bash
         run: |
-          IMAGE_TAG=${GITHUB_REF#refs/tags/}
-          make -e REGISTRY=$REGISTRY -e TAG="${IMAGE_TAG}" test-in-docker
+          ./scripts/test.sh
 
       - name: Prepare docker buildx
         id: prep

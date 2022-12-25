@@ -1,4 +1,4 @@
-name: build-vsphere-autoscaler
+name: build-aws-autoscaler
 on:
   push:
     branches:
@@ -76,7 +76,7 @@ jobs:
       - name: test-in-docker
         shell: bash
         run: |
-          make -e REGISTRY=$REGISTRY -e TAG=test-ci test-in-docker
+          ./scripts/test.sh
 
   sonarcloud:
     name: SonarCloud

@@ -43,7 +43,7 @@ cat > ./test/test.json <<EOF
     "profile": "${AWS_PROFILE}",
     "region" : "${AWS_REGION}",
     "keyName": "${SSH_KEYNAME}",
-    "timeout": 60,
+    "timeout": 600,
     "ami": "${SEED_IMAGE}",
     "iam-role-arn": "${IAM_ROLE_ARN}",
     "instanceName": "test-kubernetes-aws-autoscaler",
@@ -177,7 +177,7 @@ cat > ./test/config.json <<EOF
       "keyName": "${SSH_KEYNAME}",
       "ami": "${SEED_IMAGE}",
       "iam-role-arn": "${IAM_ROLE_ARN}",
-      "timeout": 120,
+      "timeout": 600,
       "tags": [
         {
           "key": "CustomTag",
@@ -202,29 +202,31 @@ cat > ./test/config.json <<EOF
 }
 EOF
 
+if [ -z "X" ]; then
 echo "Run create instance"
-go test --run Test_createInstance -timeout 60s -count 1 -race ./aws
+go test $VERBOSE --run Test_createInstance -timeout 60s -count 1 -race ./aws
 
 echo "Run get instance"
-go test --run Test_getInstanceID -timeout 60s -count 1 -race ./aws
+go test $VERBOSE --run Test_getInstanceID -timeout 60s -count 1 -race ./aws
 
 echo "Run status instance"
-go test --run Test_statusInstance -timeout 60s -count 1 -race ./aws
+go test $VERBOSE --run Test_statusInstance -timeout 60s -count 1 -race ./aws
 
 echo "Run wait for started"
-go test --run Test_waitForPowered -timeout 60s -count 1 -race ./aws
+go test $VERBOSE --run Test_waitForPowered -timeout 60s -count 1 -race ./aws
 
 echo "Run wait for IP"
-go test --run Test_waitForIP -timeout 60s -count 1 -race ./aws
+go test $VERBOSE --run Test_waitForIP -timeout 60s -count 1 -race ./aws
 
 #echo "Run power instance"
-#go test --run Test_powerOffInstance -count 1 -race ./aws
+#go test $VERBOSE --run Test_powerOffInstance -count 1 -race ./aws
 
 echo "Run shutdown instance"
-go test --run Test_shutdownInstance -timeout 60s -count 1 -race ./aws
+go test $VERBOSE --run Test_shutdownInstance -timeout 60s -count 1 -race ./aws
 
 echo "Run test delete instance"
-go test --run Test_deleteInstance -timeout 60s -count 1 -race ./aws
+go test $VERBOSE --run Test_deleteInstance -timeout 60s -count 1 -race ./aws
+fi
 
 export TEST_CONFIG=../test/config.json
 
@@ -256,7 +258,7 @@ export TestServer_Belongs=YES
 export TestServer_NodePrice=YES
 export TestServer_PodPrice=YES
 
-go test --test.short $VERBOSE -timeout 600s -race ./server -run Test_Server
+go test $VERBOSE --test.short -timeout 1200s -race ./server -run Test_Server
 
 echo "Run nodegroup test"
 
@@ -270,4 +272,4 @@ export TestNodeGroupGroup_addNode=YES
 export TestNodeGroupGroup_deleteNode=YES
 export TestNodeGroupGroup_deleteNodeGroup=YES
 
-go test --test.short $VERBOSE -timeout 600s -race ./server -run Test_Nodegroup
+go test $VERBOSE --test.short -timeout 1200s -race ./server -run Test_Nodegroup
