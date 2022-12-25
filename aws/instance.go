@@ -20,6 +20,11 @@ import (
 	"github.com/aws/aws-sdk-go/service/route53"
 )
 
+const (
+	route53_UpsertCmd = "UPSERT"
+	route53_DeleteCmd = "DELETE"
+)
+
 // Ec2Instance Running instance
 type Ec2Instance struct {
 	client       *ec2.EC2
@@ -617,6 +622,31 @@ func (instance *Ec2Instance) Status() (*Status, error) {
 	}
 }
 
+func (instance *Ec2Instance) getRegisteredRecordSetAddress(conf *Configuration, name string) (*string, error) {
+	if session, e := newSessionWithOptions(conf.GetRoute53AccessKey(), conf.GetRoute53SecretKey(), conf.GetRoute53AccessToken(), conf.GetFileName(), conf.GetRoute53Profile(), conf.GetRoute53Region()); e == nil {
+		svc := route53.New(session)
+
+		input := &route53.ListResourceRecordSetsInput{
+			HostedZoneId:    aws.String(conf.Network.ZoneID),
+			MaxItems:        aws.String("1"),
+			StartRecordName: aws.String(name),
+			StartRecordType: aws.String("A"),
+		}
+
+		if output, err := svc.ListResourceRecordSets(input); err == nil {
+			if len(output.ResourceRecordSets) > 0 && len(output.ResourceRecordSets[0].ResourceRecords) > 0 {
+				return output.ResourceRecordSets[0].ResourceRecords[0].Value, nil
+			} else {
+				return nil, fmt.Errorf("route53 entry:%s not found", name)
+			}
+		} else {
+			return nil, err
+		}
+	} else {
+		return nil, e
+	}
+}
+
 func (instance *Ec2Instance) changeResourceRecordSetsInput(conf *Configuration, cmd, name, address string, wait bool) error {
 	var svc *route53.Route53
 
@@ -626,25 +656,25 @@ func (instance *Ec2Instance) changeResourceRecordSetsInput(conf *Configuration, 
 		svc = route53.New(session)
 
 		input := &route53.ChangeResourceRecordSetsInput{
+			HostedZoneId: aws.String(conf.Network.ZoneID),
 			ChangeBatch: &route53.ChangeBatch{
+				Comment: aws.String("Kubernetes worker node"),
 				Changes: []*route53.Change{
 					{
 						Action: aws.String(cmd),
 						ResourceRecordSet: &route53.ResourceRecordSet{
 							Name: aws.String(name),
+							TTL:  aws.Int64(60),
+							Type: aws.String("A"),
 							ResourceRecords: []*route53.ResourceRecord{
 								{
 									Value: aws.String(address),
 								},
 							},
-							TTL:  aws.Int64(600),
-							Type: aws.String("A"),
 						},
 					},
 				},
-				Comment: aws.String("Kubernetes worker node"),
 			},
-			HostedZoneId: aws.String(conf.Network.ZoneID),
 		}
 
 		result, err := svc.ChangeResourceRecordSets(input)
@@ -674,6 +704,7 @@ func (instance *Ec2Instance) changeResourceRecordSetsInput(conf *Configuration, 
 			input := &route53.GetChangeInput{
 				Id: result.ChangeInfo.Id,
 			}
+
 			return svc.WaitUntilResourceRecordSetsChanged(input)
 		}
 
@@ -683,10 +714,14 @@ func (instance *Ec2Instance) changeResourceRecordSetsInput(conf *Configuration, 
 
 // RegisterDNS register EC2 instance in Route53
 func (instance *Ec2Instance) RegisterDNS(conf *Configuration, name, address string, wait bool) error {
-	return instance.changeResourceRecordSetsInput(conf, "UPSERT", name, address, wait)
+	return instance.changeResourceRecordSetsInput(conf, route53_UpsertCmd, name, address, wait)
 }
 
 // UnRegisterDNS unregister EC2 instance in Route53
-func (instance *Ec2Instance) UnRegisterDNS(conf *Configuration, name, address string, wait bool) error {
-	return instance.changeResourceRecordSetsInput(conf, "DELETE", name, address, wait)
+func (instance *Ec2Instance) UnRegisterDNS(conf *Configuration, name string, wait bool) error {
+	if address, err := instance.getRegisteredRecordSetAddress(conf, name); err == nil {
+		return instance.changeResourceRecordSetsInput(conf, route53_DeleteCmd, name, *address, wait)
+	}
+
+	return nil
 }

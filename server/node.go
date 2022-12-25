@@ -270,7 +270,7 @@ func (vm *AutoScalerServerNode) registerDNS(address string) error {
 
 		glog.Infof("Register route53 entry for instance %s, node group: %s, hostname: %s with IP:%s", vm.InstanceName, vm.NodeGroupID, hostname, address)
 
-		err = vm.runningInstance.RegisterDNS(aws, hostname, address, false)
+		err = vm.runningInstance.RegisterDNS(aws, hostname, address, vm.serverConfig.SSH.TestMode)
 	}
 
 	return err
@@ -286,7 +286,7 @@ func (vm *AutoScalerServerNode) unregisterDNS(address string) error {
 
 		glog.Infof("Unregister route53 entry for instance %s, node group: %s, hostname: %s with IP:%s", vm.InstanceName, vm.NodeGroupID, hostname, address)
 
-		err = vm.runningInstance.UnRegisterDNS(aws, hostname, address, false)
+		err = vm.runningInstance.UnRegisterDNS(aws, hostname, false)
 	}
 
 	return err
