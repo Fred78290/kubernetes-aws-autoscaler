@@ -544,8 +544,11 @@ func (vm *AutoScalerServerNode) deleteVM(c types.ClientGenerator) error {
 	if err == nil {
 		glog.Infof("Deleted VM:%s", vm.InstanceName)
 		vm.State = AutoScalerServerNodeStateDeleted
-	} else {
+	} else if !strings.HasPrefix(err.Error(), "InvalidInstanceID.NotFound: The instance ID") {
 		glog.Errorf("Could not delete VM:%s. Reason: %s", vm.InstanceName, err)
+	} else {
+		glog.Warnf("Could not delete VM:%s. does not exist", vm.InstanceName)
+		err = fmt.Errorf(constantes.ErrVMNotFound, vm.InstanceName)
 	}
 
 	return err

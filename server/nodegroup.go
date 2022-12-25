@@ -120,6 +120,11 @@ func (g *AutoScalerServerNodeGroup) cleanup(c types.ClientGenerator) error {
 		if node.NodeType == AutoScalerServerNodeAutoscaled {
 			if lastError = node.deleteVM(c); lastError != nil {
 				glog.Errorf(constantes.ErrNodeGroupCleanupFailOnVM, g.NodeGroupIdentifier, node.InstanceName, lastError)
+
+				// Not fatal on cleanup
+				if lastError.Error() == fmt.Sprintf(constantes.ErrVMNotFound, node.InstanceName) {
+					lastError = nil
+				}
 			}
 		}
 	}
