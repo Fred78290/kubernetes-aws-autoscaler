@@ -220,6 +220,10 @@ func (instance *Ec2Instance) NewContext() *context.Context {
 	return context.NewContext(instance.config.Timeout)
 }
 
+func (instance *Ec2Instance) NewContextWithTimeout(timeout time.Duration) *context.Context {
+	return context.NewContext(timeout)
+}
+
 // WaitForIP wait ip a VM by name
 func (instance *Ec2Instance) WaitForIP(callback CallbackCheckIPReady) (*string, error) {
 	var err error
@@ -517,8 +521,7 @@ func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType strin
 	return nil
 }
 
-// Delete a VM by name
-func (instance *Ec2Instance) Delete() error {
+func (instance *Ec2Instance) delete(wait bool) error {
 	ctx := instance.NewContext()
 	defer ctx.Cancel()
 
@@ -534,35 +537,72 @@ func (instance *Ec2Instance) Delete() error {
 		return err
 	}
 
+	if wait {
+		return instance.client.WaitUntilInstanceTerminated(&ec2.DescribeInstancesInput{
+			InstanceIds: []*string{
+				instance.InstanceID,
+			},
+		})
+
+	}
+
 	return nil
+}
+
+// Delete a VM by name and don't wait for terminated status
+func (instance *Ec2Instance) Delete() error {
+	return instance.delete(false)
+}
+
+// Terminate a VM by name and wait until status is terminated
+func (instance *Ec2Instance) Terminate() error {
+	return instance.delete(true)
 }
 
 // PowerOn power on a VM by name
 func (instance *Ec2Instance) PowerOn() error {
+	var err error
+
 	ctx := instance.NewContext()
-	defer ctx.Cancel()
-
-	glog.Debugf("PowerOn: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
-
 	input := &ec2.StartInstancesInput{
 		InstanceIds: []*string{
 			instance.InstanceID,
 		},
 	}
 
-	if _, err := instance.client.StartInstancesWithContext(ctx, input); err != nil {
-		return err
+	defer ctx.Cancel()
+
+	glog.Debugf("PowerOn: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
+
+	if _, err = instance.client.StartInstancesWithContext(ctx, input); err == nil {
+		// Wait start is effective
+		input := &ec2.DescribeInstancesInput{
+			InstanceIds: []*string{
+				instance.InstanceID,
+			},
+		}
+
+		if err = instance.client.WaitUntilInstanceRunning(input); err == nil {
+			if ec2Instance, err := instance.getEc2Instance(); err == nil {
+				if ec2Instance.PublicIpAddress != nil {
+					instance.AddressIP = ec2Instance.PublicIpAddress
+				} else {
+					instance.AddressIP = ec2Instance.PrivateIpAddress
+				}
+			}
+		}
+
+	} else {
+		glog.Debugf("powerOn: instance %s id (%s), got error %v", instance.InstanceName, instance.getInstanceID(), err)
 	}
 
-	return nil
+	return err
 }
 
 func (instance *Ec2Instance) powerOff(force bool) error {
+	var err error
+
 	ctx := instance.NewContext()
-	defer ctx.Cancel()
-
-	glog.Debugf("powerOff: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
-
 	input := &ec2.StopInstancesInput{
 		Force: &force,
 		InstanceIds: []*string{
@@ -570,12 +610,23 @@ func (instance *Ec2Instance) powerOff(force bool) error {
 		},
 	}
 
-	if _, err := instance.client.StopInstancesWithContext(ctx, input); err != nil {
+	defer ctx.Cancel()
+
+	glog.Debugf("powerOff: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
+
+	if _, err = instance.client.StopInstancesWithContext(ctx, input); err == nil {
+		input := &ec2.DescribeInstancesInput{
+			InstanceIds: []*string{
+				instance.InstanceID,
+			},
+		}
+
+		err = instance.client.WaitUntilInstanceStopped(input)
+	} else {
 		glog.Debugf("powerOff: instance %s id (%s), got error %v", instance.InstanceName, instance.getInstanceID(), err)
-		return err
 	}
 
-	return nil
+	return err
 }
 
 // PowerOff power off a VM by name
