@@ -212,20 +212,16 @@ func (m mockupClientGenerator) WaitNodeToBeReady(nodeName string, timeToWaitInSe
 	return nil
 }
 
-func createTestNode(ng *AutoScalerServerNodeGroup, nodeName string) *AutoScalerServerNode {
+func findEc2Instance(awsConfig *aws.Configuration, nodeName string) (*aws.Ec2Instance, AutoScalerServerNodeState) {
 	var state AutoScalerServerNodeState = AutoScalerServerNodeStateNotCreated
 	var runningInstance *aws.Ec2Instance
 	var err error
-
-	addressIP := "127.0.0.1"
-	awsConfig := ng.configuration.GetAwsConfiguration(testGroupID)
 
 	if nodeName != testNodeName {
 		if runningInstance, err = aws.GetEc2Instance(awsConfig, nodeName); err == nil {
 			if status, err := runningInstance.Status(); err == nil {
 				if status.Powered {
 					state = AutoScalerServerNodeStateRunning
-					addressIP = status.Address
 				}
 			}
 		} else {
@@ -239,7 +235,15 @@ func createTestNode(ng *AutoScalerServerNodeGroup, nodeName string) *AutoScalerS
 		runningInstance.InstanceID = awssdk.String(testInstanceID)
 		runningInstance.Region = awssdk.String(testRegion)
 		runningInstance.Zone = awssdk.String(testZone)
+		runningInstance.AddressIP = awssdk.String("127.0.0.1")
 	}
+
+	return runningInstance, state
+}
+
+func createTestNode(ng *AutoScalerServerNodeGroup, nodeName string) *AutoScalerServerNode {
+	awsConfig := ng.configuration.GetAwsConfiguration(testGroupID)
+	runningInstance, state := findEc2Instance(awsConfig, nodeName)
 
 	return &AutoScalerServerNode{
 		NodeGroupID:     testGroupID,
@@ -248,7 +252,7 @@ func createTestNode(ng *AutoScalerServerNodeGroup, nodeName string) *AutoScalerS
 		InstanceType:    "t2.micro",
 		DiskType:        "gp3",
 		DiskSize:        8192,
-		IPAddress:       addressIP,
+		IPAddress:       *runningInstance.AddressIP,
 		State:           state,
 		NodeType:        AutoScalerServerNodeAutoscaled,
 		awsConfig:       awsConfig,

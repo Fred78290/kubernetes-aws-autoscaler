@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/Fred78290/kubernetes-aws-autoscaler/aws"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/constantes"
 	apigrpc "github.com/Fred78290/kubernetes-aws-autoscaler/grpc"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/types"
@@ -24,7 +25,7 @@ const (
 	testGroupID           = "aws-ca-k8s"
 	testCRDUID            = "96cb1c71-1d2e-4c55-809f-72e874fc4b2c"
 	testNodeName          = "vm-test"
-	testInstanceID        = "i-test"
+	testInstanceID        = "i-0bd8756242a1cc854"
 	testRegion            = "us-east-1"
 	testZone              = "us-east-1a"
 	launchVMName          = "aws-ca-k8s-autoscaled-01"
@@ -55,25 +56,12 @@ func (m *serverTest) NodeGroups() {
 }
 
 func (m *serverTest) NodeGroupForNode() {
-	s, _, ctx, err := newTestServer(true, true)
+	s, ng, ctx, err := newTestServer(true, true)
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.NodeGroupForNodeRequest{
 			ProviderID: testServiceIdentifier,
-			Node: utils.ToJSON(
-				apiv1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: testNodeName,
-						UID:  testCRDUID,
-						Annotations: map[string]string{
-							constantes.AnnotationNodeGroupName:        testGroupID,
-							constantes.AnnotationNodeIndex:            "0",
-							constantes.AnnotationInstanceID:           testInstanceID,
-							constantes.AnnotationNodeAutoProvisionned: "true",
-						},
-					},
-				},
-			),
+			Node:       utils.ToJSON(createFakeNode(ng, testNodeName)),
 		}
 
 		if got, err := s.NodeGroupForNode(ctx, request); err != nil {
@@ -196,7 +184,7 @@ func (m *serverTest) Cleanup() {
 }
 
 func (m *serverTest) Refresh() {
-	s, _, ctx, err := newTestServer(true, true)
+	s, _, ctx, err := newTestServer(true, false)
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.CloudProviderServiceRequest{
@@ -283,28 +271,14 @@ func (m *serverTest) IncreaseSize() {
 }
 
 func (m *serverTest) DeleteNodes() {
-	s, _, ctx, err := newTestServer(true, true)
+	s, ng, ctx, err := newTestServer(true, true, launchVMName)
 
 	if assert.NoError(m.t, err) {
+		nodes := []string{utils.ToJSON(createFakeNode(ng, launchVMName))}
 		request := &apigrpc.DeleteNodesRequest{
 			ProviderID:  testServiceIdentifier,
 			NodeGroupID: testGroupID,
-			Node: []string{
-				utils.ToJSON(
-					apiv1.Node{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: testNodeName,
-							UID:  testCRDUID,
-							Annotations: map[string]string{
-								constantes.AnnotationNodeGroupName:        testGroupID,
-								constantes.AnnotationNodeIndex:            "0",
-								constantes.AnnotationInstanceID:           testInstanceID,
-								constantes.AnnotationNodeAutoProvisionned: "true",
-							},
-						},
-					},
-				),
-			},
+			Node:        nodes,
 		}
 
 		if got, err := s.DeleteNodes(ctx, request); err != nil {
@@ -327,7 +301,7 @@ func (m *serverTest) DecreaseTargetSize() {
 
 		if got, err := s.DecreaseTargetSize(ctx, request); err != nil {
 			m.t.Errorf("AutoScalerServerApp.DecreaseTargetSize() error = %v", err)
-		} else if got.GetError() != nil && strings.HasPrefix(got.GetError().GetReason(), "attempt to delete existing nodes") {
+		} else if got.GetError() != nil && !strings.HasPrefix(got.GetError().GetReason(), "attempt to delete existing nodes") {
 			m.t.Errorf("AutoScalerServerApp.DecreaseTargetSize() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
 		}
 	}
@@ -476,6 +450,8 @@ func (m *serverTest) Autoprovisioned() {
 }
 
 func (m *serverTest) Belongs() {
+	s, ng, ctx, err := newTestServer(true, true)
+
 	tests := []struct {
 		name    string
 		request *apigrpc.BelongsRequest
@@ -488,20 +464,7 @@ func (m *serverTest) Belongs() {
 			request: &apigrpc.BelongsRequest{
 				ProviderID:  testServiceIdentifier,
 				NodeGroupID: testGroupID,
-				Node: utils.ToJSON(
-					apiv1.Node{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: testNodeName,
-							UID:  testCRDUID,
-							Annotations: map[string]string{
-								constantes.AnnotationNodeGroupName:        testGroupID,
-								constantes.AnnotationNodeIndex:            "0",
-								constantes.AnnotationInstanceID:           testInstanceID,
-								constantes.AnnotationNodeAutoProvisionned: "true",
-							},
-						},
-					},
-				),
+				Node:        utils.ToJSON(createFakeNode(ng, testNodeName)),
 			},
 		},
 		{
@@ -511,25 +474,10 @@ func (m *serverTest) Belongs() {
 			request: &apigrpc.BelongsRequest{
 				ProviderID:  testServiceIdentifier,
 				NodeGroupID: testGroupID,
-				Node: utils.ToJSON(
-					apiv1.Node{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: "wrong-name",
-							UID:  testCRDUID,
-							Annotations: map[string]string{
-								constantes.AnnotationNodeGroupName:        testGroupID,
-								constantes.AnnotationNodeIndex:            "0",
-								constantes.AnnotationInstanceID:           testInstanceID,
-								constantes.AnnotationNodeAutoProvisionned: "true",
-							},
-						},
-					},
-				),
+				Node:        utils.ToJSON(createFakeNode(ng, "wrong-name")),
 			},
 		},
 	}
-
-	s, _, ctx, err := newTestServer(true, true)
 
 	if assert.NoError(m.t, err) {
 		for _, test := range tests {
@@ -548,27 +496,14 @@ func (m *serverTest) Belongs() {
 }
 
 func (m *serverTest) NodePrice() {
-	s, _, ctx, err := newTestServer(true, true)
+	s, ng, ctx, err := newTestServer(true, true)
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.NodePriceRequest{
 			ProviderID: testServiceIdentifier,
 			StartTime:  time.Now().Unix(),
 			EndTime:    time.Now().Add(time.Hour).Unix(),
-			Node: utils.ToJSON(
-				apiv1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: testNodeName,
-						UID:  testCRDUID,
-						Annotations: map[string]string{
-							constantes.AnnotationNodeGroupName:        testGroupID,
-							constantes.AnnotationNodeIndex:            "0",
-							constantes.AnnotationInstanceID:           testInstanceID,
-							constantes.AnnotationNodeAutoProvisionned: "true",
-						},
-					},
-				},
-			),
+			Node:       utils.ToJSON(createFakeNode(ng, testNodeName)),
 		}
 
 		if got, err := s.NodePrice(ctx, request); err != nil {
@@ -604,6 +539,27 @@ func (m *serverTest) PodPrice() {
 		} else if got.GetPrice() != 0 {
 			m.t.Errorf("AutoScalerServerApp.PodPrice() = %v, want %v", got.GetPrice(), 0)
 		}
+	}
+}
+
+func findInstanceID(awsConfig *aws.Configuration, nodeName string) string {
+	instance, _ := findEc2Instance(awsConfig, nodeName)
+
+	return *instance.InstanceID
+}
+
+func createFakeNode(ng *AutoScalerServerNodeGroup, nodeName string) apiv1.Node {
+	return apiv1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			UID:  testCRDUID,
+			Annotations: map[string]string{
+				constantes.AnnotationNodeGroupName:        testGroupID,
+				constantes.AnnotationNodeIndex:            "0",
+				constantes.AnnotationInstanceID:           findInstanceID(ng.configuration.GetAwsConfiguration(testGroupID), nodeName),
+				constantes.AnnotationNodeAutoProvisionned: "true",
+			},
+		},
 	}
 }
 
@@ -646,7 +602,7 @@ func extractAvailableMachineTypes(availableMachineTypes *apigrpc.AvailableMachin
 	return r
 }
 
-func newTestServer(addNodeGroup, addTestNode bool) (*AutoScalerServerApp, *AutoScalerServerNodeGroup, context.Context, error) {
+func newTestServer(addNodeGroup, addTestNode bool, desiredNodename ...string) (*AutoScalerServerApp, *AutoScalerServerNodeGroup, context.Context, error) {
 
 	config, ng, kubeclient, err := newTestNodeGroup()
 
@@ -665,7 +621,13 @@ func newTestServer(addNodeGroup, addTestNode bool) (*AutoScalerServerApp, *AutoS
 			s.Groups[ng.NodeGroupIdentifier] = ng
 
 			if addTestNode {
-				node := createTestNode(ng, testNodeName)
+				nodeName := testNodeName
+
+				if len(desiredNodename) > 0 {
+					nodeName = desiredNodename[0]
+				}
+
+				node := createTestNode(ng, nodeName)
 
 				ng.Nodes[node.InstanceName] = node
 			}
