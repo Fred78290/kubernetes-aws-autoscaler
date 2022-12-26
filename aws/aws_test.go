@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	glog "github.com/sirupsen/logrus"
@@ -19,41 +20,33 @@ type ConfigurationTest struct {
 	SSH          types.AutoScalerServerSSH `json:"ssh"`
 	InstanceName string                    `json:"instanceName"`
 	InstanceType string                    `json:"instanceType"`
+	inited       bool
 }
 
-var testConfig *ConfigurationTest
+var testConfig ConfigurationTest
 
 func getConfFile() string {
 	if config := os.Getenv("TEST_CONFIG"); config != "" {
 		return config
 	}
 
-	return "aws_test.json"
-}
-
-func testFeature(name string) bool {
-	if feature := os.Getenv(name); feature != "" {
-		return feature != "NO"
-	}
-
-	return true
+	return "../test/local_aws.json"
 }
 
 func loadFromJson(fileName string) *ConfigurationTest {
-	if testConfig == nil {
-		file, err := os.Open(fileName)
-		if err != nil {
+	if !testConfig.inited {
+		if configStr, err := os.ReadFile(fileName); err != nil {
 			glog.Fatalf("failed to open config file:%s, error:%v", fileName, err)
-		}
+		} else {
+			err = json.Unmarshal(configStr, &testConfig)
 
-		decoder := json.NewDecoder(file)
-		err = decoder.Decode(&testConfig)
-		if err != nil {
-			glog.Fatalf("failed to decode config file:%s, error:%v", fileName, err)
+			if err != nil {
+				glog.Fatalf("failed to decode config file:%s, error:%v", fileName, err)
+			}
 		}
 	}
 
-	return testConfig
+	return &testConfig
 }
 
 func (config *ConfigurationTest) CheckIfIPIsReady(nodename, address string) error {
@@ -65,7 +58,7 @@ func (config *ConfigurationTest) CheckIfIPIsReady(nodename, address string) erro
 }
 
 func Test_AuthMethodKey(t *testing.T) {
-	if testFeature("Test_AuthMethodKey") {
+	if utils.ShouldTestFeature("Test_AuthMethodKey") {
 		config := loadFromJson(getConfFile())
 
 		signer := utils.AuthMethodFromPrivateKeyFile(config.SSH.GetAuthKeys())
@@ -75,7 +68,7 @@ func Test_AuthMethodKey(t *testing.T) {
 }
 
 func Test_Sudo(t *testing.T) {
-	if testFeature("Test_Sudo") {
+	if utils.ShouldTestFeature("Test_Sudo") {
 		config := loadFromJson(getConfFile())
 
 		out, err := utils.Sudo(&config.SSH, "localhost", 10, "ls")
@@ -87,11 +80,13 @@ func Test_Sudo(t *testing.T) {
 }
 
 func Test_getInstanceID(t *testing.T) {
-	if testFeature("Test_getInstanceID") {
+	if utils.ShouldTestFeature("Test_getInstanceID") {
 		config := loadFromJson(getConfFile())
 
 		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
-			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.InstanceName))
+			if !strings.HasPrefix(err.Error(), "unable to find VM:") {
+				assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.InstanceName))
+			}
 		} else {
 			if assert.NotNil(t, instance) {
 				status, err := instance.Status()
@@ -105,7 +100,7 @@ func Test_getInstanceID(t *testing.T) {
 }
 
 func Test_createInstance(t *testing.T) {
-	if testFeature("Test_createInstance") {
+	if utils.ShouldTestFeature("Test_createInstance") {
 		config := loadFromJson(getConfFile())
 
 		_, err := config.Create(0, "test-aws-autoscaler", config.InstanceName, config.InstanceType, config.DiskType, config.DiskSize, nil, nil)
@@ -117,7 +112,7 @@ func Test_createInstance(t *testing.T) {
 }
 
 func Test_statusInstance(t *testing.T) {
-	if testFeature("Test_statusInstance") {
+	if utils.ShouldTestFeature("Test_statusInstance") {
 		config := loadFromJson(getConfFile())
 
 		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
@@ -133,7 +128,7 @@ func Test_statusInstance(t *testing.T) {
 }
 
 func Test_waitForPowered(t *testing.T) {
-	if testFeature("Test_waitForPowered") {
+	if utils.ShouldTestFeature("Test_waitForPowered") {
 		config := loadFromJson(getConfFile())
 
 		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
@@ -151,7 +146,7 @@ func Test_waitForPowered(t *testing.T) {
 }
 
 func Test_waitForIP(t *testing.T) {
-	if testFeature("Test_waitForIP") {
+	if utils.ShouldTestFeature("Test_waitForIP") {
 		config := loadFromJson(getConfFile())
 
 		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
@@ -169,12 +164,12 @@ func Test_waitForIP(t *testing.T) {
 }
 
 func Test_powerOnInstance(t *testing.T) {
-	if testFeature("Test_powerOnInstance") {
+	if utils.ShouldTestFeature("Test_powerOnInstance") {
 		config := loadFromJson(getConfFile())
 
 		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
 			assert.NoError(t, err, fmt.Sprintf("Can't find ec2 instance named:%s", config.InstanceName))
-		} else if status, err := instance.Status(); assert.NoError(t, err, "Can't get status on VM") && status.Powered == false {
+		} else if status, err := instance.Status(); assert.NoError(t, err, "Can't get status on VM") {
 			if status.Powered == false {
 				err = instance.PowerOn()
 
@@ -193,7 +188,7 @@ func Test_powerOnInstance(t *testing.T) {
 }
 
 func Test_powerOffInstance(t *testing.T) {
-	if testFeature("Test_powerOffInstance") {
+	if utils.ShouldTestFeature("Test_powerOffInstance") {
 		config := loadFromJson(getConfFile())
 
 		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
@@ -209,7 +204,7 @@ func Test_powerOffInstance(t *testing.T) {
 }
 
 func Test_shutdownInstance(t *testing.T) {
-	if testFeature("Test_shutdownInstance") {
+	if utils.ShouldTestFeature("Test_shutdownInstance") {
 		config := loadFromJson(getConfFile())
 
 		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
@@ -225,7 +220,7 @@ func Test_shutdownInstance(t *testing.T) {
 }
 
 func Test_deleteInstance(t *testing.T) {
-	if testFeature("Test_deleteInstance") {
+	if utils.ShouldTestFeature("Test_deleteInstance") {
 		config := loadFromJson(getConfFile())
 
 		if instance, err := config.GetInstanceID(config.InstanceName); err != nil {
