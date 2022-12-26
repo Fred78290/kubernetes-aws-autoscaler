@@ -43,7 +43,7 @@ cat > ./test/test.json <<EOF
     "profile": "${AWS_PROFILE}",
     "region" : "${AWS_REGION}",
     "keyName": "${SSH_KEYNAME}",
-    "timeout": 600,
+    "timeout": 900,
     "ami": "${SEED_IMAGE}",
     "iam-role-arn": "${IAM_ROLE_ARN}",
     "instanceName": "test-kubernetes-aws-autoscaler",
@@ -177,7 +177,7 @@ cat > ./test/config.json <<EOF
       "keyName": "${SSH_KEYNAME}",
       "ami": "${SEED_IMAGE}",
       "iam-role-arn": "${IAM_ROLE_ARN}",
-      "timeout": 600,
+      "timeout": 900,
       "tags": [
         {
           "key": "CustomTag",
@@ -218,7 +218,7 @@ echo "Run wait for started"
 go test $VERBOSE --run Test_waitForPowered -timeout 60s -count 1 -race ./aws
 
 echo "Run wait for IP"
-go test $VERBOSE --run Test_waitForIP -timeout 60s -count 1 -race ./aws
+go test $VERBOSE --run Test_waitForIP -timeout 120s -count 1 -race ./aws
 
 #echo "Run power instance"
 #go test $VERBOSE --run Test_powerOffInstance -count 1 -race ./aws
