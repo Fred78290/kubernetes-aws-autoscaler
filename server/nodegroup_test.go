@@ -18,52 +18,98 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-type nodegroupTest struct {
+type baseTest struct {
 	t *testing.T
 }
 
+type nodegroupTest struct {
+	baseTest
+}
+
+type autoScalerServerNodeGroupTest struct {
+	AutoScalerServerNodeGroup
+	t         *testing.T
+	awsConfig *aws.Configuration
+}
+
+func (ng *autoScalerServerNodeGroupTest) createTestNode(name ...string) *AutoScalerServerNode {
+	nodeName := testNodeName
+
+	if len(name) > 0 {
+		nodeName = name[0]
+	}
+
+	if machine, ok := ng.configuration.Machines[ng.InstanceType]; ok {
+		runningInstance, state := findEc2Instance(ng.awsConfig, nodeName)
+
+		node := &AutoScalerServerNode{
+			NodeGroupID:     testGroupID,
+			InstanceName:    nodeName,
+			NodeName:        nodeName,
+			InstanceType:    ng.InstanceType,
+			DiskType:        machine.DiskType,
+			DiskSize:        machine.DiskSize,
+			IPAddress:       *runningInstance.AddressIP,
+			State:           state,
+			NodeType:        AutoScalerServerNodeAutoscaled,
+			awsConfig:       ng.awsConfig,
+			serverConfig:    ng.configuration,
+			runningInstance: runningInstance,
+		}
+
+		ng.Nodes[nodeName] = node
+		ng.RunningNodes[len(ng.RunningNodes)+1] = ServerNodeStateRunning
+
+		return node
+	}
+
+	ng.t.Fatalf("Unable to find machine definition for type: %s", ng.InstanceType)
+
+	return nil
+}
+
 func (m *nodegroupTest) launchVM() {
-	_, ng, testNode, kubeClient, err := newTestNode(launchVMName)
+	ng, testNode, err := m.newTestNode(launchVMName)
 
 	if assert.NoError(m.t, err) {
-		if err := testNode.launchVM(kubeClient, ng.NodeLabels, ng.SystemLabels); err != nil {
+		if err := testNode.launchVM(m, ng.NodeLabels, ng.SystemLabels); err != nil {
 			m.t.Errorf("AutoScalerNode.launchVM() error = %v", err)
 		}
 	}
 }
 
 func (m *nodegroupTest) startVM() {
-	_, _, testNode, kubeClient, err := newTestNode(launchVMName)
+	_, testNode, err := m.newTestNode(launchVMName)
 
 	if assert.NoError(m.t, err) {
-		if err := testNode.startVM(kubeClient); err != nil {
+		if err := testNode.startVM(m); err != nil {
 			m.t.Errorf("AutoScalerNode.startVM() error = %v", err)
 		}
 	}
 }
 
 func (m *nodegroupTest) stopVM() {
-	_, _, testNode, kubeClient, err := newTestNode(launchVMName)
+	_, testNode, err := m.newTestNode(launchVMName)
 
 	if assert.NoError(m.t, err) {
-		if err := testNode.stopVM(kubeClient); err != nil {
+		if err := testNode.stopVM(m); err != nil {
 			m.t.Errorf("AutoScalerNode.stopVM() error = %v", err)
 		}
 	}
 }
 
 func (m *nodegroupTest) deleteVM() {
-	_, _, testNode, kubeClient, err := newTestNode(launchVMName)
+	_, testNode, err := m.newTestNode(launchVMName)
 
 	if assert.NoError(m.t, err) {
-		if err := testNode.deleteVM(kubeClient); err != nil {
+		if err := testNode.deleteVM(m); err != nil {
 			m.t.Errorf("AutoScalerNode.deleteVM() error = %v", err)
 		}
 	}
 }
 
 func (m *nodegroupTest) statusVM() {
-	_, _, testNode, _, err := newTestNode(launchVMName)
+	_, testNode, err := m.newTestNode(launchVMName)
 
 	if assert.NoError(m.t, err) {
 		if got, err := testNode.statusVM(); err != nil {
@@ -75,58 +121,55 @@ func (m *nodegroupTest) statusVM() {
 }
 
 func (m *nodegroupTest) addNode() {
-	_, ng, kubeClient, err := newTestNodeGroup()
+	ng, err := m.newTestNodeGroup()
 
 	if assert.NoError(m.t, err) {
-		if _, err := ng.addNodes(kubeClient, 1); err != nil {
+		if _, err := ng.addNodes(m, 1); err != nil {
 			m.t.Errorf("AutoScalerServerNodeGroup.addNode() error = %v", err)
 		}
 	}
 }
 
 func (m *nodegroupTest) deleteNode() {
-	_, ng, testNode, kubeClient, err := newTestNode(launchVMName)
+	ng, testNode, err := m.newTestNode(launchVMName)
 
 	if assert.NoError(m.t, err) {
-		if err := ng.deleteNodeByName(kubeClient, testNode.NodeName); err != nil {
+		if err := ng.deleteNodeByName(m, testNode.NodeName); err != nil {
 			m.t.Errorf("AutoScalerServerNodeGroup.deleteNode() error = %v", err)
 		}
 	}
 }
 
 func (m *nodegroupTest) deleteNodeGroup() {
-	_, ng, kubeClient, err := newTestNodeGroup()
+	ng, err := m.newTestNodeGroup()
 
 	if assert.NoError(m.t, err) {
-		if err := ng.deleteNodeGroup(kubeClient); err != nil {
+		if err := ng.deleteNodeGroup(m); err != nil {
 			m.t.Errorf("AutoScalerServerNodeGroup.deleteNodeGroup() error = %v", err)
 		}
 	}
 }
 
-type mockupClientGenerator struct {
+func (m *baseTest) fixAnnotation(node *apiv1.Node) {
 }
 
-func (m mockupClientGenerator) fixAnnotation(node *apiv1.Node) {
-}
-
-func (m mockupClientGenerator) KubeClient() (kubernetes.Interface, error) {
+func (m *baseTest) KubeClient() (kubernetes.Interface, error) {
 	return nil, nil
 }
 
-func (m mockupClientGenerator) NodeManagerClient() (managednodeClientset.Interface, error) {
+func (m *baseTest) NodeManagerClient() (managednodeClientset.Interface, error) {
 	return nil, nil
 }
 
-func (m mockupClientGenerator) ApiExtentionClient() (apiextension.Interface, error) {
+func (m *baseTest) ApiExtentionClient() (apiextension.Interface, error) {
 	return nil, nil
 }
 
-func (m mockupClientGenerator) PodList(nodeName string, podFilter types.PodFilterFunc) ([]apiv1.Pod, error) {
+func (m *baseTest) PodList(nodeName string, podFilter types.PodFilterFunc) ([]apiv1.Pod, error) {
 	return nil, nil
 }
 
-func (m mockupClientGenerator) NodeList() (*apiv1.NodeList, error) {
+func (m *baseTest) NodeList() (*apiv1.NodeList, error) {
 	node := apiv1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: testNodeName,
@@ -151,27 +194,27 @@ func (m mockupClientGenerator) NodeList() (*apiv1.NodeList, error) {
 	}, nil
 }
 
-func (m mockupClientGenerator) UncordonNode(nodeName string) error {
+func (m *baseTest) UncordonNode(nodeName string) error {
 	return nil
 }
 
-func (m mockupClientGenerator) CordonNode(nodeName string) error {
+func (m *baseTest) CordonNode(nodeName string) error {
 	return nil
 }
 
-func (m mockupClientGenerator) SetProviderID(nodeName, providerID string) error {
+func (m *baseTest) SetProviderID(nodeName, providerID string) error {
 	return nil
 }
 
-func (m mockupClientGenerator) MarkDrainNode(nodeName string) error {
+func (m *baseTest) MarkDrainNode(nodeName string) error {
 	return nil
 }
 
-func (m mockupClientGenerator) DrainNode(nodeName string, ignoreDaemonSet, deleteLocalData bool) error {
+func (m *baseTest) DrainNode(nodeName string, ignoreDaemonSet, deleteLocalData bool) error {
 	return nil
 }
 
-func (m mockupClientGenerator) GetNode(nodeName string) (*apiv1.Node, error) {
+func (m *baseTest) GetNode(nodeName string) (*apiv1.Node, error) {
 	node := &apiv1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: testNodeName,
@@ -192,24 +235,103 @@ func (m mockupClientGenerator) GetNode(nodeName string) (*apiv1.Node, error) {
 	return node, nil
 }
 
-func (m mockupClientGenerator) DeleteNode(nodeName string) error {
+func (m *baseTest) DeleteNode(nodeName string) error {
 	return nil
 }
 
-func (m mockupClientGenerator) AnnoteNode(nodeName string, annotations map[string]string) error {
+func (m *baseTest) AnnoteNode(nodeName string, annotations map[string]string) error {
 	return nil
 }
 
-func (m mockupClientGenerator) LabelNode(nodeName string, labels map[string]string) error {
+func (m *baseTest) LabelNode(nodeName string, labels map[string]string) error {
 	return nil
 }
 
-func (m mockupClientGenerator) TaintNode(nodeName string, taints ...apiv1.Taint) error {
+func (m *baseTest) TaintNode(nodeName string, taints ...apiv1.Taint) error {
 	return nil
 }
 
-func (m mockupClientGenerator) WaitNodeToBeReady(nodeName string, timeToWaitInSeconds int) error {
+func (m *baseTest) WaitNodeToBeReady(nodeName string, timeToWaitInSeconds int) error {
 	return nil
+}
+
+func (m *baseTest) newTestNode(name ...string) (*autoScalerServerNodeGroupTest, *AutoScalerServerNode, error) {
+	if ng, err := m.newTestNodeGroup(); err == nil {
+		vm := ng.createTestNode(name...)
+
+		return ng, vm, err
+	} else {
+		return nil, nil, err
+	}
+}
+
+func (m *baseTest) newTestNodeGroup() (*autoScalerServerNodeGroupTest, error) {
+	config, err := m.newTestConfig()
+
+	if err == nil {
+		ng := &autoScalerServerNodeGroupTest{
+			t:         m.t,
+			awsConfig: config.GetAwsConfiguration(testGroupID),
+			AutoScalerServerNodeGroup: AutoScalerServerNodeGroup{
+				AutoProvision:              true,
+				ServiceIdentifier:          config.ServiceIdentifier,
+				NodeGroupIdentifier:        testGroupID,
+				ProvisionnedNodeNamePrefix: config.ProvisionnedNodeNamePrefix,
+				ManagedNodeNamePrefix:      config.ManagedNodeNamePrefix,
+				ControlPlaneNamePrefix:     config.ControlPlaneNamePrefix,
+				InstanceType:               config.DefaultMachineType,
+				Status:                     NodegroupCreated,
+				MinNodeSize:                config.MinNode,
+				MaxNodeSize:                config.MaxNode,
+				SystemLabels:               types.KubernetesLabel{},
+				Nodes:                      make(map[string]*AutoScalerServerNode),
+				RunningNodes:               make(map[int]ServerNodeState),
+				pendingNodes:               make(map[string]*AutoScalerServerNode),
+				configuration:              config,
+				NodeLabels:                 config.NodeLabels,
+			},
+		}
+
+		return ng, err
+	}
+
+	return nil, err
+}
+
+func (m *baseTest) getConfFile() string {
+	if config := os.Getenv("TEST_CONFIG"); config != "" {
+		return config
+	}
+
+	return "../test/local_config.json"
+}
+
+func (m *baseTest) newTestConfig() (*types.AutoScalerServerConfig, error) {
+	var config types.AutoScalerServerConfig
+
+	if configStr, err := os.ReadFile(m.getConfFile()); err != nil {
+		return nil, err
+	} else {
+		err = json.Unmarshal(configStr, &config)
+
+		if err != nil {
+			return nil, err
+		}
+
+		config.SSH.TestMode = true
+
+		return &config, nil
+	}
+}
+
+func (m *baseTest) ssh() {
+	config, err := m.newTestConfig()
+
+	if assert.NoError(m.t, err) {
+		if _, err = utils.Sudo(config.SSH, "127.0.0.1", 1, "ls"); err != nil {
+			m.t.Errorf("SSH error = %v", err)
+		}
+	}
 }
 
 func findEc2Instance(awsConfig *aws.Configuration, nodeName string) (*aws.Ec2Instance, AutoScalerServerNodeState) {
@@ -241,163 +363,52 @@ func findEc2Instance(awsConfig *aws.Configuration, nodeName string) (*aws.Ec2Ins
 	return runningInstance, state
 }
 
-func createTestNode(ng *AutoScalerServerNodeGroup, nodeName string) *AutoScalerServerNode {
-	awsConfig := ng.configuration.GetAwsConfiguration(testGroupID)
-	runningInstance, state := findEc2Instance(awsConfig, nodeName)
+func findInstanceID(awsConfig *aws.Configuration, nodeName string) string {
+	instance, _ := findEc2Instance(awsConfig, nodeName)
 
-	return &AutoScalerServerNode{
-		NodeGroupID:     testGroupID,
-		InstanceName:    nodeName,
-		NodeName:        nodeName,
-		InstanceType:    "t2.micro",
-		DiskType:        "gp3",
-		DiskSize:        8192,
-		IPAddress:       *runningInstance.AddressIP,
-		State:           state,
-		NodeType:        AutoScalerServerNodeAutoscaled,
-		awsConfig:       awsConfig,
-		serverConfig:    ng.configuration,
-		runningInstance: runningInstance,
-	}
+	return *instance.InstanceID
 }
 
-func newTestNode(name ...string) (*types.AutoScalerServerConfig, *AutoScalerServerNodeGroup, *AutoScalerServerNode, types.ClientGenerator, error) {
-	nodeName := testNodeName
-	config, ng, kubeClient, err := newTestNodeGroup()
-
-	if len(name) > 0 {
-		nodeName = name[0]
-	}
-
-	if err == nil {
-		vm := createTestNode(ng, nodeName)
-
-		ng.Nodes[nodeName] = vm
-		ng.RunningNodes[1] = ServerNodeStateRunning
-
-		return config, ng, vm, kubeClient, err
-	}
-
-	return config, ng, nil, kubeClient, err
-}
-
-func newTestNodeGroup() (*types.AutoScalerServerConfig, *AutoScalerServerNodeGroup, types.ClientGenerator, error) {
-	config, kubeClient, err := newTestConfig()
-
-	if err == nil {
-		ng := &AutoScalerServerNodeGroup{
-			AutoProvision:              true,
-			ServiceIdentifier:          testServiceIdentifier,
-			NodeGroupIdentifier:        testGroupID,
-			ProvisionnedNodeNamePrefix: "autoscaled",
-			ManagedNodeNamePrefix:      "worker",
-			ControlPlaneNamePrefix:     "master",
-			InstanceType:               "t2.micro",
-			Status:                     NodegroupCreated,
-			MinNodeSize:                0,
-			MaxNodeSize:                5,
-			SystemLabels:               types.KubernetesLabel{},
-			Nodes:                      make(map[string]*AutoScalerServerNode),
-			RunningNodes:               make(map[int]ServerNodeState),
-			pendingNodes:               make(map[string]*AutoScalerServerNode),
-			configuration:              config,
-			NodeLabels: types.KubernetesLabel{
-				"monitor":  "true",
-				"database": "true",
-			},
-		}
-
-		return config, ng, kubeClient, err
-	}
-
-	return nil, nil, nil, err
-}
-
-func getConfFile() string {
-	if config := os.Getenv("TEST_CONFIG"); config != "" {
-		return config
-	}
-
-	return "../test/local_config.json"
-}
-
-func newTestConfig() (*types.AutoScalerServerConfig, types.ClientGenerator, error) {
-	var config types.AutoScalerServerConfig
-
-	if configStr, err := os.ReadFile(getConfFile()); err != nil {
-		return nil, nil, err
-	} else {
-		err = json.Unmarshal(configStr, &config)
-
-		if err != nil {
-			return nil, nil, err
-		}
-
-		config.SSH.TestMode = true
-
-		kubeClient := mockupClientGenerator{}
-
-		return &config, kubeClient, nil
+func createTestNodegroup(t *testing.T) *nodegroupTest {
+	return &nodegroupTest{
+		baseTest: baseTest{
+			t: t,
+		},
 	}
 }
 
 func Test_SSH(t *testing.T) {
-	config, _, err := newTestConfig()
-
-	if assert.NoError(t, err) {
-		t.Run("Launch VM", func(t *testing.T) {
-			if _, err = utils.Sudo(config.SSH, "127.0.0.1", 1, "ls"); err != nil {
-				t.Errorf("SSH error = %v", err)
-			}
-		})
-	}
-
+	createTestNodegroup(t).ssh()
 }
 
 func TestNodeGroup_launchVM(t *testing.T) {
-	test := nodegroupTest{t: t}
-
-	test.launchVM()
+	createTestNodegroup(t).launchVM()
 }
 
 func TestNodeGroup_startVM(t *testing.T) {
-	test := nodegroupTest{t: t}
-
-	test.startVM()
+	createTestNodegroup(t).startVM()
 }
 
 func TestNodeGroup_stopVM(t *testing.T) {
-	test := nodegroupTest{t: t}
-
-	test.stopVM()
+	createTestNodegroup(t).stopVM()
 }
 
 func TestNodeGroup_deleteVM(t *testing.T) {
-	test := nodegroupTest{t: t}
-
-	test.deleteVM()
+	createTestNodegroup(t).deleteVM()
 }
 
 func TestNodeGroup_statusVM(t *testing.T) {
-	test := nodegroupTest{t: t}
-
-	test.statusVM()
+	createTestNodegroup(t).statusVM()
 }
 
 func TestNodeGroupGroup_addNode(t *testing.T) {
-	test := nodegroupTest{t: t}
-
-	test.addNode()
+	createTestNodegroup(t).addNode()
 }
 
 func TestNodeGroupGroup_deleteNode(t *testing.T) {
-	test := nodegroupTest{t: t}
-
-	test.deleteNode()
+	createTestNodegroup(t).deleteNode()
 }
 
 func TestNodeGroupGroup_deleteNodeGroup(t *testing.T) {
-	test := nodegroupTest{t: t}
-
-	test.deleteNodeGroup()
+	createTestNodegroup(t).deleteNodeGroup()
 }

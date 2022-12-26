@@ -20,4 +20,4 @@ export PRIVATE_DOMAIN_NAME=$PRIVATE_DOMAIN_NAME
 export PUBLIC_DOMAIN_NAME=$PUBLIC_DOMAIN_NAME
 EOF
 
-make -e REGISTRY=$REGISTRY -e TAG=test-ci test-in-docker
+make -e REGISTRY=fred78290 -e TAG=test-ci test-in-docker

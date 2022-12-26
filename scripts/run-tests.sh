@@ -2,20 +2,24 @@
 CURDIR=$(dirname $0)
 set -e
 
-go clean -testcache
-
 AWSDEFS=${CURDIR}/local.env
 VERBOSE=-test.v
 
-if [ -f "${AWSDEFS}" ]; then
-  source ${AWSDEFS}
+if [ ! -f "${AWSDEFS}" ]; then
+  echo "File ${AWSDEFS} not found, exit test"
+  exit 1
 fi
+
+source ${AWSDEFS}
 
 if [ -z $AWS_ACCESSKEY ] && [ -z $AWS_PROFILE ]; then
-    exit 0
+    echo "Neither AWS_ACCESSKEY or AWS_PROFILE are defined, exit test"
+    exit 1
 fi
 
-go mod vendor
+mkdir -p ${HOME}/.ssh
+
+echo -n ${SSH_PRIVATEKEY} | base64 -d > ${HOME}/.ssh/test_rsa
 
 export Test_AuthMethodKey=NO
 export Test_Sudo=NO
@@ -30,10 +34,6 @@ export Test_shutdownInstance=YES
 export Test_deleteInstance=YES
 
 export TEST_CONFIG=../test/test.json
-
-echo -n ${SSH_PRIVATEKEY} | base64 -d > ${HOME}/.ssh/test_rsa
-
-mkdir -p ${HOME}/.ssh
 
 cat > ./test/test.json <<EOF
 {
@@ -202,7 +202,9 @@ cat > ./test/config.json <<EOF
 }
 EOF
 
-if [ -z "X" ]; then
+go clean -testcache
+go mod vendor
+
 echo "Run create instance"
 go test $VERBOSE --run Test_createInstance -timeout 60s -count 1 -race ./aws
 
@@ -222,11 +224,10 @@ go test $VERBOSE --run Test_waitForIP -timeout 60s -count 1 -race ./aws
 #go test $VERBOSE --run Test_powerOffInstance -count 1 -race ./aws
 
 echo "Run shutdown instance"
-go test $VERBOSE --run Test_shutdownInstance -timeout 60s -count 1 -race ./aws
+go test $VERBOSE --run Test_shutdownInstance -timeout 600s -count 1 -race ./aws
 
 echo "Run test delete instance"
 go test $VERBOSE --run Test_deleteInstance -timeout 60s -count 1 -race ./aws
-fi
 
 export TEST_CONFIG=../test/config.json
 
