@@ -1,5 +1,5 @@
 #!/bin/bash
-cat > ./test/local.env <<EOF
+cat > ./scripts/local.env <<EOF
 export SEED_IMAGE=$SEED_IMAGE
 export IAM_ROLE_ARN=$IAM_ROLE_ARN
 export SSH_KEYNAME=$SSH_KEYNAME
