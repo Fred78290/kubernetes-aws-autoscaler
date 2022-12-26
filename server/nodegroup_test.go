@@ -19,7 +19,8 @@ import (
 )
 
 type baseTest struct {
-	t *testing.T
+	testConfig *aws.Configuration
+	t          *testing.T
 }
 
 type nodegroupTest struct {
@@ -28,8 +29,7 @@ type nodegroupTest struct {
 
 type autoScalerServerNodeGroupTest struct {
 	AutoScalerServerNodeGroup
-	t         *testing.T
-	awsConfig *aws.Configuration
+	baseTest
 }
 
 func (ng *autoScalerServerNodeGroupTest) createTestNode(name ...string) *AutoScalerServerNode {
@@ -40,7 +40,7 @@ func (ng *autoScalerServerNodeGroupTest) createTestNode(name ...string) *AutoSca
 	}
 
 	if machine, ok := ng.configuration.Machines[ng.InstanceType]; ok {
-		runningInstance, state := findEc2Instance(ng.awsConfig, nodeName)
+		runningInstance, state := findEc2Instance(ng.testConfig, nodeName)
 
 		node := &AutoScalerServerNode{
 			NodeGroupID:     testGroupID,
@@ -52,7 +52,7 @@ func (ng *autoScalerServerNodeGroupTest) createTestNode(name ...string) *AutoSca
 			IPAddress:       *runningInstance.AddressIP,
 			State:           state,
 			NodeType:        AutoScalerServerNodeAutoscaled,
-			awsConfig:       ng.awsConfig,
+			awsConfig:       ng.testConfig,
 			serverConfig:    ng.configuration,
 			runningInstance: runningInstance,
 		}
@@ -150,9 +150,6 @@ func (m *nodegroupTest) deleteNodeGroup() {
 	}
 }
 
-func (m *baseTest) fixAnnotation(node *apiv1.Node) {
-}
-
 func (m *baseTest) KubeClient() (kubernetes.Interface, error) {
 	return nil, nil
 }
@@ -185,8 +182,6 @@ func (m *baseTest) NodeList() (*apiv1.NodeList, error) {
 		},
 	}
 
-	m.fixAnnotation(&node)
-
 	return &apiv1.NodeList{
 		Items: []apiv1.Node{
 			node,
@@ -217,20 +212,18 @@ func (m *baseTest) DrainNode(nodeName string, ignoreDaemonSet, deleteLocalData b
 func (m *baseTest) GetNode(nodeName string) (*apiv1.Node, error) {
 	node := &apiv1.Node{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: testNodeName,
+			Name: nodeName,
 			UID:  testCRDUID,
 			Annotations: map[string]string{
 				constantes.AnnotationNodeGroupName:        testGroupID,
 				constantes.AnnotationNodeIndex:            "0",
-				constantes.AnnotationInstanceID:           testInstanceID,
+				constantes.AnnotationInstanceID:           findInstanceID(m.testConfig, nodeName),
 				constantes.AnnotationNodeAutoProvisionned: "true",
 				constantes.AnnotationScaleDownDisabled:    "false",
 				constantes.AnnotationNodeManaged:          "false",
 			},
 		},
 	}
-
-	m.fixAnnotation(node)
 
 	return node, nil
 }
@@ -270,8 +263,10 @@ func (m *baseTest) newTestNodeGroup() (*autoScalerServerNodeGroupTest, error) {
 
 	if err == nil {
 		ng := &autoScalerServerNodeGroupTest{
-			t:         m.t,
-			awsConfig: config.GetAwsConfiguration(testGroupID),
+			baseTest: baseTest{
+				t:          m.t,
+				testConfig: m.testConfig,
+			},
 			AutoScalerServerNodeGroup: AutoScalerServerNodeGroup{
 				AutoProvision:              true,
 				ServiceIdentifier:          config.ServiceIdentifier,
@@ -312,15 +307,13 @@ func (m *baseTest) newTestConfig() (*types.AutoScalerServerConfig, error) {
 	if configStr, err := os.ReadFile(m.getConfFile()); err != nil {
 		return nil, err
 	} else {
-		err = json.Unmarshal(configStr, &config)
-
-		if err != nil {
-			return nil, err
+		if err = json.Unmarshal(configStr, &config); err == nil {
+			m.testConfig = config.GetAwsConfiguration(testGroupID)
+			m.testConfig.TestMode = true
+			config.SSH.TestMode = true
 		}
 
-		config.SSH.TestMode = true
-
-		return &config, nil
+		return &config, err
 	}
 }
 

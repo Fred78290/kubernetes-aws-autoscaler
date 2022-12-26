@@ -40,6 +40,7 @@ type Configuration struct {
 	Network   Network       `json:"network"`
 	DiskType  string        `default:"standard" json:"diskType"`
 	DiskSize  int           `default:"10" json:"diskSize"`
+	TestMode  bool          `json:"-"`
 }
 
 // Tag aws tag

@@ -63,7 +63,7 @@ func (m *serverTest) NodeGroups() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.CloudProviderServiceRequest{
-			ProviderID: testServiceIdentifier,
+			ProviderID: s.configuration.ServiceIdentifier,
 		}
 
 		if got, err := s.NodeGroups(context.TODO(), request); err != nil {
@@ -79,7 +79,7 @@ func (m *serverTest) NodeGroupForNode() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.NodeGroupForNodeRequest{
-			ProviderID: testServiceIdentifier,
+			ProviderID: s.configuration.ServiceIdentifier,
 			Node:       utils.ToJSON(s.createFakeNode(testNodeName)),
 		}
 
@@ -98,15 +98,15 @@ func (m *serverTest) Pricing() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.CloudProviderServiceRequest{
-			ProviderID: testServiceIdentifier,
+			ProviderID: s.configuration.ServiceIdentifier,
 		}
 
 		if got, err := s.Pricing(context.TODO(), request); err != nil {
 			m.t.Errorf("AutoScalerServerApp.Pricing() error = %v", err)
 		} else if got.GetError() != nil {
 			m.t.Errorf("AutoScalerServerApp.Pricing() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-		} else if !reflect.DeepEqual(got.GetPriceModel().GetId(), testServiceIdentifier) {
-			m.t.Errorf("AutoScalerServerApp.Pricing() = %v, want %v", got.GetPriceModel().GetId(), testServiceIdentifier)
+		} else if !reflect.DeepEqual(got.GetPriceModel().GetId(), s.configuration.ServiceIdentifier) {
+			m.t.Errorf("AutoScalerServerApp.Pricing() = %v, want %v", got.GetPriceModel().GetId(), s.configuration.ServiceIdentifier)
 		}
 	}
 }
@@ -128,7 +128,7 @@ func (m *serverTest) GetAvailableMachineTypes() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.CloudProviderServiceRequest{
-			ProviderID: testServiceIdentifier,
+			ProviderID: s.configuration.ServiceIdentifier,
 		}
 
 		if got, err := s.GetAvailableMachineTypes(context.TODO(), request); err != nil {
@@ -146,13 +146,11 @@ func (m *serverTest) NewNodeGroup() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.NewNodeGroupRequest{
-			ProviderID:  testServiceIdentifier,
-			MachineType: "t3a.micro",
-			Labels: types.KubernetesLabel{
-				"database": "true",
-				"cluster":  "true",
-			},
+			ProviderID:  s.configuration.ServiceIdentifier,
+			MachineType: s.configuration.DefaultMachineType,
+			Labels:      s.configuration.NodeLabels,
 		}
+
 		if got, err := s.NewNodeGroup(context.TODO(), request); err != nil {
 			m.t.Errorf("AutoScalerServerApp.NewNodeGroup() error = %v", err)
 		} else if got.GetError() != nil {
@@ -173,7 +171,7 @@ func (m *serverTest) GetResourceLimiter() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.CloudProviderServiceRequest{
-			ProviderID: testServiceIdentifier,
+			ProviderID: s.configuration.ServiceIdentifier,
 		}
 
 		if got, err := s.GetResourceLimiter(context.TODO(), request); err != nil {
@@ -191,7 +189,7 @@ func (m *serverTest) Cleanup() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.CloudProviderServiceRequest{
-			ProviderID: testServiceIdentifier,
+			ProviderID: s.configuration.ServiceIdentifier,
 		}
 
 		if got, err := s.Cleanup(context.TODO(), request); err != nil {
@@ -207,7 +205,7 @@ func (m *serverTest) Refresh() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.CloudProviderServiceRequest{
-			ProviderID: testServiceIdentifier,
+			ProviderID: s.configuration.ServiceIdentifier,
 		}
 
 		if got, err := s.Refresh(context.TODO(), request); err != nil {
@@ -223,7 +221,7 @@ func (m *serverTest) MaxSize() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.NodeGroupServiceRequest{
-			ProviderID:  testServiceIdentifier,
+			ProviderID:  s.configuration.ServiceIdentifier,
 			NodeGroupID: testGroupID,
 		}
 
@@ -240,7 +238,7 @@ func (m *serverTest) MinSize() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.NodeGroupServiceRequest{
-			ProviderID:  testServiceIdentifier,
+			ProviderID:  s.configuration.ServiceIdentifier,
 			NodeGroupID: testGroupID,
 		}
 
@@ -257,7 +255,7 @@ func (m *serverTest) TargetSize() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.NodeGroupServiceRequest{
-			ProviderID:  testServiceIdentifier,
+			ProviderID:  s.configuration.ServiceIdentifier,
 			NodeGroupID: testGroupID,
 		}
 
@@ -276,7 +274,7 @@ func (m *serverTest) IncreaseSize() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.IncreaseSizeRequest{
-			ProviderID:  testServiceIdentifier,
+			ProviderID:  s.configuration.ServiceIdentifier,
 			NodeGroupID: testGroupID,
 			Delta:       1,
 		}
@@ -295,7 +293,7 @@ func (m *serverTest) DeleteNodes() {
 	if assert.NoError(m.t, err) {
 		nodes := []string{utils.ToJSON(s.createFakeNode(launchVMName))}
 		request := &apigrpc.DeleteNodesRequest{
-			ProviderID:  testServiceIdentifier,
+			ProviderID:  s.configuration.ServiceIdentifier,
 			NodeGroupID: testGroupID,
 			Node:        nodes,
 		}
@@ -313,7 +311,7 @@ func (m *serverTest) DecreaseTargetSize() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.DecreaseTargetSizeRequest{
-			ProviderID:  testServiceIdentifier,
+			ProviderID:  s.configuration.ServiceIdentifier,
 			NodeGroupID: testGroupID,
 			Delta:       -1,
 		}
@@ -331,7 +329,7 @@ func (m *serverTest) Id() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.NodeGroupServiceRequest{
-			ProviderID:  testServiceIdentifier,
+			ProviderID:  s.configuration.ServiceIdentifier,
 			NodeGroupID: testGroupID,
 		}
 
@@ -348,7 +346,7 @@ func (m *serverTest) Debug() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.NodeGroupServiceRequest{
-			ProviderID:  testServiceIdentifier,
+			ProviderID:  s.configuration.ServiceIdentifier,
 			NodeGroupID: testGroupID,
 		}
 
@@ -367,7 +365,7 @@ func (m *serverTest) Nodes() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.NodeGroupServiceRequest{
-			ProviderID:  testServiceIdentifier,
+			ProviderID:  s.configuration.ServiceIdentifier,
 			NodeGroupID: testGroupID,
 		}
 
@@ -386,7 +384,7 @@ func (m *serverTest) TemplateNodeInfo() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.NodeGroupServiceRequest{
-			ProviderID:  testServiceIdentifier,
+			ProviderID:  s.configuration.ServiceIdentifier,
 			NodeGroupID: testGroupID,
 		}
 
@@ -403,7 +401,7 @@ func (m *serverTest) Exist() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.NodeGroupServiceRequest{
-			ProviderID:  testServiceIdentifier,
+			ProviderID:  s.configuration.ServiceIdentifier,
 			NodeGroupID: testGroupID,
 		}
 
@@ -420,7 +418,7 @@ func (m *serverTest) Create() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.NodeGroupServiceRequest{
-			ProviderID:  testServiceIdentifier,
+			ProviderID:  s.configuration.ServiceIdentifier,
 			NodeGroupID: testGroupID,
 		}
 
@@ -439,7 +437,7 @@ func (m *serverTest) Delete() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.NodeGroupServiceRequest{
-			ProviderID:  testServiceIdentifier,
+			ProviderID:  s.configuration.ServiceIdentifier,
 			NodeGroupID: testGroupID,
 		}
 
@@ -456,7 +454,7 @@ func (m *serverTest) Autoprovisioned() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.NodeGroupServiceRequest{
-			ProviderID:  testServiceIdentifier,
+			ProviderID:  s.configuration.ServiceIdentifier,
 			NodeGroupID: testGroupID,
 		}
 
@@ -481,7 +479,7 @@ func (m *serverTest) Belongs() {
 			name: "Belongs",
 			want: true,
 			request: &apigrpc.BelongsRequest{
-				ProviderID:  testServiceIdentifier,
+				ProviderID:  s.configuration.ServiceIdentifier,
 				NodeGroupID: testGroupID,
 				Node:        utils.ToJSON(s.createFakeNode(testNodeName)),
 			},
@@ -491,7 +489,7 @@ func (m *serverTest) Belongs() {
 			want:    false,
 			wantErr: false,
 			request: &apigrpc.BelongsRequest{
-				ProviderID:  testServiceIdentifier,
+				ProviderID:  s.configuration.ServiceIdentifier,
 				NodeGroupID: testGroupID,
 				Node:        utils.ToJSON(s.createFakeNode("wrong-name")),
 			},
@@ -519,7 +517,7 @@ func (m *serverTest) NodePrice() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.NodePriceRequest{
-			ProviderID: testServiceIdentifier,
+			ProviderID: s.configuration.ServiceIdentifier,
 			StartTime:  time.Now().Unix(),
 			EndTime:    time.Now().Add(time.Hour).Unix(),
 			Node:       utils.ToJSON(s.createFakeNode(testNodeName)),
@@ -540,7 +538,7 @@ func (m *serverTest) PodPrice() {
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.PodPriceRequest{
-			ProviderID: testServiceIdentifier,
+			ProviderID: s.configuration.ServiceIdentifier,
 			StartTime:  time.Now().Unix(),
 			EndTime:    time.Now().Add(time.Hour).Unix(),
 			Pod:        utils.ToJSON(s.createFakeNode(testNodeName)),
