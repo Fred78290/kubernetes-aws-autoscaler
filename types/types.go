@@ -34,6 +34,9 @@ const (
 	ManagedNodeMaxDiskSize = 1024 * 1024
 )
 
+// KubernetesLabel labels
+type KubernetesLabel map[string]string
+
 type Config struct {
 	APIServerURL             string
 	KubeConfig               string
@@ -145,6 +148,7 @@ type AutoScalerServerSSH struct {
 	UserName string `json:"user"`
 	Password string `json:"password"`
 	AuthKeys string `json:"ssh-private-key"`
+	TestMode bool   `json:"-"`
 }
 
 // GetUserName returns user name from config or the real current username is empty or equal to ~
@@ -186,7 +190,7 @@ type AutoScalerServerConfig struct {
 	KubernetesPKIDestDir       string                            `default:"/etc/kubernetes/pki" json:"kubernetes-pki-dstdir"`
 	Network                    string                            `default:"tcp" json:"network"`                     // Mandatory, Network to listen (see grpc doc) to listen
 	Listen                     string                            `default:"0.0.0.0:5200" json:"listen"`             // Mandatory, Address to listen
-	ProviderID                 string                            `json:"secret"`                                    // Mandatory, secret Identifier, client must match this
+	ServiceIdentifier          string                            `json:"secret"`                                    // Mandatory, secret Identifier, client must match this
 	MinNode                    int                               `json:"minNode"`                                   // Mandatory, Min AutoScaler VM
 	MaxNode                    int                               `json:"maxNode"`                                   // Mandatory, Max AutoScaler VM
 	MaxPods                    int                               `json:"maxPods"`                                   // Mandatory, Max kubelet pods
@@ -198,6 +202,7 @@ type AutoScalerServerConfig struct {
 	PodPrice                   float64                           `json:"podPrice"`                                  // Optional, The pod price
 	KubeAdm                    KubeJoinConfig                    `json:"kubeadm"`
 	DefaultMachineType         string                            `default:"standard" json:"default-machine"`
+	NodeLabels                 KubernetesLabel                   `json:"nodeLabels"`
 	Machines                   map[string]*MachineCharacteristic `default:"{\"standard\": {}}" json:"machines"` // Mandatory, Available machines
 	Optionals                  *AutoScalerServerOptionals        `json:"optionals"`
 	ManagedNodeResourceLimiter *ResourceLimiter                  `json:"managednodes-limits"`

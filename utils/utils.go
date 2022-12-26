@@ -2,17 +2,36 @@ package utils
 
 import (
 	"encoding/json"
-	"fmt"
-	"net/url"
 	"os"
 	"time"
 
-	"github.com/Fred78290/kubernetes-aws-autoscaler/constantes"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/context"
-	glog "github.com/sirupsen/logrus"
+	"github.com/Fred78290/kubernetes-aws-autoscaler/types"
 	"gopkg.in/yaml.v2"
 	apiv1 "k8s.io/api/core/v1"
 )
+
+// ShouldTestFeature check if test must be done
+func ShouldTestFeature(name string) bool {
+	if feature := os.Getenv(name); feature != "" {
+		return feature != "NO"
+	}
+
+	return true
+}
+
+// MergeKubernetesLabel merge kubernetes map in one
+func MergeKubernetesLabel(labels ...types.KubernetesLabel) types.KubernetesLabel {
+	merged := types.KubernetesLabel{}
+
+	for _, label := range labels {
+		for k, v := range label {
+			merged[k] = v
+		}
+	}
+
+	return merged
+}
 
 // NodeFromJSON deserialize a string to apiv1.Node
 func NodeFromJSON(s string) (*apiv1.Node, error) {
@@ -43,76 +62,6 @@ func ToJSON(v interface{}) string {
 	b, _ := json.Marshal(v)
 
 	return string(b)
-}
-
-// GetNodeProviderID func
-func GetNodeProviderID(serverIdentifier string, node *apiv1.Node) string {
-	providerID := node.Spec.ProviderID
-
-	if len(providerID) == 0 {
-		nodegroupName := node.Labels[constantes.NodeLabelGroupName]
-		instanceName := node.Name
-
-		// Node name and instance name could be differ when using AWS cloud provider
-		if len(node.Annotations[constantes.AnnotationInstanceName]) > 0 {
-			instanceName = node.Annotations[constantes.AnnotationInstanceName]
-		}
-
-		if len(nodegroupName) != 0 {
-			providerID = fmt.Sprintf("%s://%s/object?type=node&name=%s", serverIdentifier, nodegroupName, instanceName)
-			glog.Infof("Warning misconfiguration: node providerID: %s is extracted from node label.", providerID)
-		}
-	}
-
-	return providerID
-}
-
-// NodeGroupIDFromProviderID returns group node name from provider
-func NodeGroupIDFromProviderID(serverIdentifier string, providerID string) (string, error) {
-	var nodeIdentifier *url.URL
-	var err error
-
-	if nodeIdentifier, err = url.ParseRequestURI(providerID); err != nil {
-		return "", err
-	}
-
-	if nodeIdentifier == nil {
-		return "", fmt.Errorf(constantes.ErrCantDecodeNodeID, providerID)
-	}
-
-	if nodeIdentifier.Scheme != serverIdentifier {
-		return "", fmt.Errorf(constantes.ErrWrongSchemeInProviderID, providerID, serverIdentifier, nodeIdentifier.Scheme)
-	}
-
-	if nodeIdentifier.Path != "object" && nodeIdentifier.Path != "/object" {
-		return "", fmt.Errorf(constantes.ErrWrongPathInProviderID, providerID, nodeIdentifier.Path)
-	}
-
-	return nodeIdentifier.Hostname(), nil
-}
-
-// NodeNameFromProviderID return node name from provider ID
-func NodeNameFromProviderID(serverIdentifier string, providerID string) (string, error) {
-	var nodeIdentifier *url.URL
-	var err error
-
-	if nodeIdentifier, err = url.ParseRequestURI(providerID); err != nil {
-		return "", err
-	}
-
-	if nodeIdentifier == nil {
-		return "", fmt.Errorf(constantes.ErrCantDecodeNodeID, providerID)
-	}
-
-	if nodeIdentifier.Scheme != serverIdentifier {
-		return "", fmt.Errorf(constantes.ErrWrongSchemeInProviderID, providerID, serverIdentifier, nodeIdentifier.Scheme)
-	}
-
-	if nodeIdentifier.Path != "object" && nodeIdentifier.Path != "/object" {
-		return "", fmt.Errorf(constantes.ErrWrongPathInProviderID, providerID, nodeIdentifier.Path)
-	}
-
-	return nodeIdentifier.Query().Get("name"), nil
 }
 
 // FileExists Check if FileExists
