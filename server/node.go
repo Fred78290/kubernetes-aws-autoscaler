@@ -441,6 +441,7 @@ func (vm *AutoScalerServerNode) startVM(c types.ClientGenerator) error {
 
 			vm.State = AutoScalerServerNodeStateRunning
 		}
+
 	} else if state != AutoScalerServerNodeStateRunning {
 		err = fmt.Errorf(constantes.ErrStartVMFailed, vm.InstanceName, fmt.Sprintf("Unexpected state: %d", state))
 	}
