@@ -35,7 +35,9 @@ export Test_deleteInstance=YES
 
 export TEST_CONFIG=../test/test.json
 
-cat > ./test/test.json <<EOF
+export
+
+tee ./test/test.json <<EOF
 {
     "accessKey": "${AWS_ACCESSKEY}",
     "secretKey": "${AWS_SECRETKEY}",
@@ -74,7 +76,7 @@ cat > ./test/test.json <<EOF
 }
 EOF
 
-cat > ./test/config.json <<EOF
+tee ./test/config.json <<EOF
 {
   "use-external-etcd": false,
   "src-etcd-ssl-dir": "/etc/etcd/ssl",
