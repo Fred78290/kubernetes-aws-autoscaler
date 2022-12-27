@@ -1,10 +1,14 @@
 name: build-aws-autoscaler
 on:
   push:
+    paths:
+      - "**/**.go"
+      - go.mod
+      - go.sum
     branches:
       - '*'
     tags:
-      - '!*'
+      - ci-build
 
   pull_request:
     types: [opened, synchronize, reopened]
