@@ -4,11 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
-	"reflect"
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
 	glog "github.com/sirupsen/logrus"
 )
 
@@ -28,19 +26,21 @@ const (
 
 // Configuration declares aws connection info
 type Configuration struct {
-	AccessKey string        `json:"accessKey"`
-	SecretKey string        `json:"secretKey"`
-	Token     string        `json:"token"`
-	Profile   string        `json:"profile"`
-	Region    string        `json:"region"`
+	AccessKey string        `json:"accessKey,omitempty"`
+	SecretKey string        `json:"secretKey,omitempty"`
+	Token     string        `json:"token,omitempty"`
+	Filename  string        `json:"filename,omitempty"`
+	Profile   string        `json:"profile,omitempty"`
+	Region    string        `json:"region,omitempty"`
 	Timeout   time.Duration `json:"timeout"`
 	ImageID   string        `json:"ami"`
 	IamRole   string        `json:"iam-role-arn"`
 	KeyName   string        `json:"keyName"`
-	Tags      []Tag         `json:"tags"`
-	Network   *Network      `json:"network"`
+	Tags      []Tag         `json:"tags,omitempty"`
+	Network   Network       `json:"network"`
 	DiskType  string        `default:"standard" json:"diskType"`
 	DiskSize  int           `default:"10" json:"diskSize"`
+	TestMode  bool          `json:"-"`
 }
 
 // Tag aws tag
@@ -51,21 +51,21 @@ type Tag struct {
 
 // Network declare network configuration
 type Network struct {
-	ZoneID          *string            `json:"route53"`
-	PrivateZoneName *string            `json:"privateZoneName"`
-	AccessKey       *string            `json:"accessKey"`
-	SecretKey       *string            `json:"secretKey"`
-	Token           *string            `json:"token"`
-	Profile         *string            `json:"profile"`
-	Region          *string            `json:"region"`
-	ENI             []NetworkInterface `json:"eni"`
+	ZoneID          string             `json:"route53,omitempty"`
+	PrivateZoneName string             `json:"privateZoneName,omitempty"`
+	AccessKey       string             `json:"accessKey,omitempty"`
+	SecretKey       string             `json:"secretKey,omitempty"`
+	Token           string             `json:"token,omitempty"`
+	Profile         string             `json:"profile,omitempty"`
+	Region          string             `json:"region,omitempty"`
+	ENI             []NetworkInterface `json:"eni,omitempty"`
 }
 
 // NetworkInterface declare ENI interface
 type NetworkInterface struct {
-	SubnetsID       interface{} `json:"subnets"`
-	SecurityGroupID string      `json:"securityGroup"`
-	PublicIP        bool        `json:"publicIP"`
+	SubnetsID       []string `json:"subnets"`
+	SecurityGroupID string   `json:"securityGroup"`
+	PublicIP        bool     `json:"publicIP"`
 }
 
 // UserDefinedNetworkInterface declare a network interface interface overriding default Eni
@@ -89,6 +89,8 @@ type CallbackCheckIPReady interface {
 }
 
 func randomNumberInRange(min, max int) int {
+	rand.Seed(time.Now().UnixNano())
+
 	return rand.Intn(max-min) + min
 }
 
@@ -121,22 +123,16 @@ func Copy(dst interface{}, src interface{}) error {
 	return nil
 }
 
-func (eni *NetworkInterface) GetRandomSubnetsID() *string {
-	var str string
-	s := reflect.ValueOf(eni.SubnetsID)
+func (eni *NetworkInterface) GetRandomSubnetsID() string {
+	numOfEnis := len(eni.SubnetsID)
 
-	switch reflect.TypeOf(eni.SubnetsID).Kind() {
-	case reflect.String:
-		str = s.String()
-	case reflect.Slice:
-		str = fmt.Sprintf("%v", s.Index(randomNumberInRange(0, (s.Len()*2)-1)))
+	if numOfEnis == 1 {
+		return eni.SubnetsID[0]
 	}
 
-	if len(str) > 0 {
-		return aws.String(str)
-	}
+	index := randomNumberInRange(0, numOfEnis-1)
 
-	return nil
+	return eni.SubnetsID[index]
 }
 
 // Log logging
@@ -149,10 +145,14 @@ func (conf *Configuration) GetInstanceID(name string) (*Ec2Instance, error) {
 	return GetEc2Instance(conf, name)
 }
 
+func (conf *Configuration) GetFileName() string {
+	return conf.Filename
+}
+
 // GetRoute53AccessKey return route53 access key or default
 func (conf *Configuration) GetRoute53AccessKey() string {
-	if conf.Network.AccessKey != nil && *conf.Network.AccessKey != "" {
-		return *conf.Network.AccessKey
+	if !isNullOrEmpty(conf.Network.AccessKey) {
+		return conf.Network.AccessKey
 	}
 
 	return conf.AccessKey
@@ -160,8 +160,8 @@ func (conf *Configuration) GetRoute53AccessKey() string {
 
 // GetRoute53SecretKey return route53 secret key or default
 func (conf *Configuration) GetRoute53SecretKey() string {
-	if conf.Network.SecretKey != nil && *conf.Network.SecretKey != "" {
-		return *conf.Network.SecretKey
+	if !isNullOrEmpty(conf.Network.SecretKey) {
+		return conf.Network.SecretKey
 	}
 
 	return conf.SecretKey
@@ -169,8 +169,8 @@ func (conf *Configuration) GetRoute53SecretKey() string {
 
 // GetRoute53AccessToken return route53 token or default
 func (conf *Configuration) GetRoute53AccessToken() string {
-	if conf.Network.Token != nil && *conf.Network.Token != "" {
-		return *conf.Network.Token
+	if !isNullOrEmpty(conf.Network.Token) {
+		return conf.Network.Token
 	}
 
 	return conf.Token
@@ -178,8 +178,8 @@ func (conf *Configuration) GetRoute53AccessToken() string {
 
 // GetRoute53Profile return route53 profile or default
 func (conf *Configuration) GetRoute53Profile() string {
-	if conf.Network.Profile != nil && *conf.Network.Profile != "" {
-		return *conf.Network.Profile
+	if !isNullOrEmpty(conf.Network.Profile) {
+		return conf.Network.Profile
 	}
 
 	return conf.Profile
@@ -187,8 +187,8 @@ func (conf *Configuration) GetRoute53Profile() string {
 
 // GetRoute53Profile return route53 region or default
 func (conf *Configuration) GetRoute53Region() string {
-	if conf.Network.Region != nil && *conf.Network.Region != "" {
-		return *conf.Network.Region
+	if !isNullOrEmpty(conf.Network.Region) {
+		return conf.Network.Region
 	}
 
 	return conf.Region

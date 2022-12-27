@@ -49,9 +49,6 @@ const (
 	// ErrUnableToDeleteNodeGroup error msg
 	ErrUnableToDeleteNodeGroup = "can't delete node group: %s, reason: %v"
 
-	// ErrCantDecodeNodeIDWithReason error msg
-	ErrCantDecodeNodeIDWithReason = "node providerID %s not conform, reason: %v"
-
 	// ErrCantDecodeNodeID error msg
 	ErrCantDecodeNodeID = "node providerID %s not conform"
 
@@ -87,12 +84,6 @@ const (
 
 	// ErrUnableToDeleteVM error msg
 	ErrUnableToDeleteVM = "unable to delete the VM owned by node: %s, reason: %v"
-
-	// ErrWrongSchemeInProviderID error msg
-	ErrWrongSchemeInProviderID = "wrong scheme in providerID %s. expect %s, got: %s"
-
-	// ErrWrongPathInProviderID error msg
-	ErrWrongPathInProviderID = "wrong path in providerID: %s. expect object, got: %s"
 
 	// ErrVMAlreadyCreated error msg
 	ErrVMAlreadyCreated = "unable to launch VM, %s is already created"
@@ -138,6 +129,9 @@ const (
 
 	// ErrVMNotFound error msg
 	ErrVMNotFound = "unable to find VM: %s"
+
+	// ErrZoneIDNotFound error msg
+	ErrZoneIDNotFound = "unable to find zone: %s"
 
 	// ErrVMStopFailed error msg
 	ErrVMStopFailed = "unable to stop VM: %s before delete"

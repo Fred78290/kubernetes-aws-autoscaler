@@ -4,561 +4,483 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	apiv1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Fred78290/kubernetes-aws-autoscaler/constantes"
 	apigrpc "github.com/Fred78290/kubernetes-aws-autoscaler/grpc"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/types"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/utils"
-	apiv1 "k8s.io/api/core/v1"
 )
 
 const (
-	testProviderID = "aws"
-	testGroupID    = "aws-ca-k8s"
-	testNodeName   = "aws-ca-k8s-vm-01"
+	testServiceIdentifier = "aws"
+	testCRDUID            = "96cb1c71-1d2e-4c55-809f-72e874fc4b2c"
+	testInstanceID        = "i-0bd8756242a1cc854"
+	testRegion            = "us-east-1"
+	testZone              = "us-east-1a"
+	defaultJobID          = "ca-k8s"
+	templateTestGroupID   = "aws-%s"
+	templateTestNodeName  = "aws-%s-vm-test"
+	templateLaunchVMName  = "aws-%s-autoscaled-01"
 )
 
-func newTestServer(addNodeGroup, addTestNode bool) (*AutoScalerServerApp, *AutoScalerServerNodeGroup, context.Context, error) {
+type autoScalerServerAppTest struct {
+	AutoScalerServerApp
+	ng *autoScalerServerNodeGroupTest
+}
 
-	config, ng, err := newTestNodeGroup()
+func (s *autoScalerServerAppTest) createFakeNode(name ...string) apiv1.Node {
+	nodeName := s.ng.getTestNodeName()
+	nodegroupID := s.ng.getNodeGroupID()
 
-	if err == nil {
-		s := &AutoScalerServerApp{
-			ResourceLimiter: &types.ResourceLimiter{
-				MinLimits: map[string]int64{constantes.ResourceNameCores: 1, constantes.ResourceNameMemory: 10000000},
-				MaxLimits: map[string]int64{constantes.ResourceNameCores: 5, constantes.ResourceNameMemory: 100000000},
+	if len(name) > 0 {
+		nodeName = name[0]
+	}
+
+	return apiv1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			UID:  testCRDUID,
+			Annotations: map[string]string{
+				constantes.AnnotationNodeGroupName:        nodegroupID,
+				constantes.AnnotationNodeIndex:            "0",
+				constantes.AnnotationInstanceID:           findInstanceID(s.configuration.GetAwsConfiguration(nodegroupID), nodeName),
+				constantes.AnnotationNodeAutoProvisionned: "true",
 			},
-			Groups:        map[string]*AutoScalerServerNodeGroup{},
-			configuration: config,
-		}
-
-		if addNodeGroup {
-			s.Groups[ng.NodeGroupIdentifier] = ng
-
-			if addTestNode {
-				node := createTestNode(ng)
-
-				ng.Nodes[node.InstanceName] = node
-			}
-		}
-
-		return s, ng, context.TODO(), err
+		},
 	}
-
-	return nil, nil, nil, err
 }
 
-func extractNodeGroup(nodeGroups []*apigrpc.NodeGroup) []string {
-	r := make([]string, len(nodeGroups))
-
-	for i, n := range nodeGroups {
-		r[i] = n.Id
-	}
-
-	return r
+type serverTest struct {
+	baseTest
 }
 
-func TestAutoScalerServer_NodeGroups(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, false)
+func (m *serverTest) NodeGroups() {
+	s, err := m.newTestServer(true, false)
 
 	expected := []string{
-		testGroupID,
+		m.getNodeGroupID(),
 	}
 
-	if assert.NoError(t, err) {
-		t.Run("NodeGroups", func(t *testing.T) {
-			request := &apigrpc.CloudProviderServiceRequest{
-				ProviderID: testProviderID,
-			}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.CloudProviderServiceRequest{
+			ProviderID: s.configuration.ServiceIdentifier,
+		}
 
-			if got, err := s.NodeGroups(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.NodeGroups() error = %v", err)
-			} else if !reflect.DeepEqual(extractNodeGroup(got.GetNodeGroups()), expected) {
-				t.Errorf("AutoScalerServerApp.NodeGroups() = %v, want %v", extractNodeGroup(got.GetNodeGroups()), expected)
-			}
-		})
+		if got, err := s.NodeGroups(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.NodeGroups() error = %v", err)
+		} else if !reflect.DeepEqual(m.extractNodeGroup(got.GetNodeGroups()), expected) {
+			m.t.Errorf("AutoScalerServerApp.NodeGroups() = %v, want %v", m.extractNodeGroup(got.GetNodeGroups()), expected)
+		}
 	}
 }
 
-func TestAutoScalerServer_NodeGroupForNode(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, true)
+func (m *serverTest) NodeGroupForNode() {
+	nodegroupID := m.getNodeGroupID()
+	s, err := m.newTestServer(true, true)
 
-	if assert.NoError(t, err) {
-		t.Run("NodeGroupForNode", func(t *testing.T) {
-			request := &apigrpc.NodeGroupForNodeRequest{
-				ProviderID: testProviderID,
-				Node: utils.ToJSON(
-					apiv1.Node{
-						Spec: apiv1.NodeSpec{
-							ProviderID: fmt.Sprintf("%s://%s/object?type=node&name=%s", testProviderID, testGroupID, testNodeName),
-						},
-					},
-				),
-			}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.NodeGroupForNodeRequest{
+			ProviderID: s.configuration.ServiceIdentifier,
+			Node:       utils.ToJSON(s.createFakeNode()),
+		}
 
-			if got, err := s.NodeGroupForNode(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.NodeGroupForNode() error = %v", err)
-			} else if got.GetError() != nil {
-				t.Errorf("AutoScalerServerApp.NodeGroupForNode() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else if !reflect.DeepEqual(got.GetNodeGroup().GetId(), testGroupID) {
-				t.Errorf("AutoScalerServerApp.NodeGroupForNode() = %v, want %v", got.GetNodeGroup().GetId(), testGroupID)
-			}
-		})
+		if got, err := s.NodeGroupForNode(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.NodeGroupForNode() error = %v", err)
+		} else if got.GetError() != nil {
+			m.t.Errorf("AutoScalerServerApp.NodeGroupForNode() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+		} else if !reflect.DeepEqual(got.GetNodeGroup().GetId(), nodegroupID) {
+			m.t.Errorf("AutoScalerServerApp.NodeGroupForNode() = %v, want %v", got.GetNodeGroup().GetId(), nodegroupID)
+		}
 	}
 }
 
-func TestAutoScalerServer_Pricing(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, false)
+func (m *serverTest) Pricing() {
+	s, err := m.newTestServer(true, false)
 
-	if assert.NoError(t, err) {
-		t.Run("Pricing", func(t *testing.T) {
-			request := &apigrpc.CloudProviderServiceRequest{
-				ProviderID: testProviderID,
-			}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.CloudProviderServiceRequest{
+			ProviderID: s.configuration.ServiceIdentifier,
+		}
 
-			if got, err := s.Pricing(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.Pricing() error = %v", err)
-			} else if got.GetError() != nil {
-				t.Errorf("AutoScalerServerApp.Pricing() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else if !reflect.DeepEqual(got.GetPriceModel().GetId(), testProviderID) {
-				t.Errorf("AutoScalerServerApp.Pricing() = %v, want %v", got.GetPriceModel().GetId(), testProviderID)
-			}
-		})
+		if got, err := s.Pricing(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.Pricing() error = %v", err)
+		} else if got.GetError() != nil {
+			m.t.Errorf("AutoScalerServerApp.Pricing() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+		} else if !reflect.DeepEqual(got.GetPriceModel().GetId(), s.configuration.ServiceIdentifier) {
+			m.t.Errorf("AutoScalerServerApp.Pricing() = %v, want %v", got.GetPriceModel().GetId(), s.configuration.ServiceIdentifier)
+		}
 	}
 }
 
-func extractAvailableMachineTypes(availableMachineTypes *apigrpc.AvailableMachineTypes) []string {
-	r := make([]string, len(availableMachineTypes.MachineType))
-
-	for i, m := range availableMachineTypes.MachineType {
-		r[i] = m
-	}
-
-	return r
-}
-
-func TestAutoScalerServer_GetAvailableMachineTypes(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, false)
+func (m *serverTest) GetAvailableMachineTypes() {
+	s, err := m.newTestServer(true, false)
 
 	expected := []string{
-		"tiny",
-		"medium",
-		"large",
-		"extra-large",
+		"t3a.2xlarge",
+		"t3a.large",
+		"t3a.medium",
+		"t3a.micro",
+		"t3a.nano",
+		"t3a.small",
+		"t3a.xlarge",
 	}
 
-	if assert.NoError(t, err) {
-		t.Run("GetAvailableMachineTypes", func(t *testing.T) {
-			request := &apigrpc.CloudProviderServiceRequest{
-				ProviderID: testProviderID,
-			}
+	sort.Strings(expected)
 
-			if got, err := s.GetAvailableMachineTypes(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.GetAvailableMachineTypes() error = %v", err)
-			} else if got.GetError() != nil {
-				t.Errorf("AutoScalerServerApp.GetAvailableMachineTypes() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else if !reflect.DeepEqual(extractAvailableMachineTypes(got.GetAvailableMachineTypes()), expected) {
-				t.Errorf("AutoScalerServerApp.GetAvailableMachineTypes() = %v, want %v", extractAvailableMachineTypes(got.GetAvailableMachineTypes()), expected)
-			}
-		})
-	}
-}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.CloudProviderServiceRequest{
+			ProviderID: s.configuration.ServiceIdentifier,
+		}
 
-func TestAutoScalerServer_NewNodeGroup(t *testing.T) {
-	s, _, ctx, err := newTestServer(false, false)
-
-	if assert.NoError(t, err) {
-		t.Run("NewNodeGroup", func(t *testing.T) {
-
-			request := &apigrpc.NewNodeGroupRequest{
-				ProviderID:  testProviderID,
-				MachineType: "tiny",
-				Labels: KubernetesLabel{
-					"database": "true",
-					"cluster":  "true",
-				},
-			}
-			if got, err := s.NewNodeGroup(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.NewNodeGroup() error = %v", err)
-			} else if got.GetError() != nil {
-				t.Errorf("AutoScalerServerApp.NewNodeGroup() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else {
-				t.Logf("AutoScalerServerApp.NewNodeGroup() return node group created :%v", got.GetNodeGroup().GetId())
-			}
-		})
+		if got, err := s.GetAvailableMachineTypes(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.GetAvailableMachineTypes() error = %v", err)
+		} else if got.GetError() != nil {
+			m.t.Errorf("AutoScalerServerApp.GetAvailableMachineTypes() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+		} else if !reflect.DeepEqual(m.extractAvailableMachineTypes(got.GetAvailableMachineTypes()), expected) {
+			m.t.Errorf("AutoScalerServerApp.GetAvailableMachineTypes() = %v, want %v", m.extractAvailableMachineTypes(got.GetAvailableMachineTypes()), expected)
+		}
 	}
 }
 
-func extractResourceLimiter(res *apigrpc.ResourceLimiter) *types.ResourceLimiter {
-	r := &types.ResourceLimiter{
-		MinLimits: res.MinLimits,
-		MaxLimits: res.MaxLimits,
-	}
+func (m *serverTest) NewNodeGroup() {
+	s, err := m.newTestServer(false, false)
 
-	return r
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.NewNodeGroupRequest{
+			ProviderID:  s.configuration.ServiceIdentifier,
+			MachineType: s.configuration.DefaultMachineType,
+			Labels:      s.configuration.NodeLabels,
+		}
+
+		if got, err := s.NewNodeGroup(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.NewNodeGroup() error = %v", err)
+		} else if got.GetError() != nil {
+			m.t.Errorf("AutoScalerServerApp.NewNodeGroup() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+		} else {
+			m.t.Logf("AutoScalerServerApp.NewNodeGroup() return node group created :%v", got.GetNodeGroup().GetId())
+		}
+	}
 }
 
-func TestAutoScalerServer_GetResourceLimiter(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, false)
+func (m *serverTest) GetResourceLimiter() {
+	s, err := m.newTestServer(true, false)
 
 	expected := &types.ResourceLimiter{
 		MinLimits: map[string]int64{constantes.ResourceNameCores: 1, constantes.ResourceNameMemory: 10000000},
 		MaxLimits: map[string]int64{constantes.ResourceNameCores: 5, constantes.ResourceNameMemory: 100000000},
 	}
 
-	if assert.NoError(t, err) {
-		t.Run("GetResourceLimiter", func(t *testing.T) {
-			request := &apigrpc.CloudProviderServiceRequest{
-				ProviderID: testProviderID,
-			}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.CloudProviderServiceRequest{
+			ProviderID: s.configuration.ServiceIdentifier,
+		}
 
-			if got, err := s.GetResourceLimiter(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.GetResourceLimiter() error = %v", err)
-			} else if got.GetError() != nil {
-				t.Errorf("AutoScalerServerApp.GetResourceLimiter() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else if !reflect.DeepEqual(extractResourceLimiter(got.GetResourceLimiter()), expected) {
-				t.Errorf("AutoScalerServerApp.GetResourceLimiter() = %v, want %v", got.GetResourceLimiter(), expected)
-			}
-		})
+		if got, err := s.GetResourceLimiter(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.GetResourceLimiter() error = %v", err)
+		} else if got.GetError() != nil {
+			m.t.Errorf("AutoScalerServerApp.GetResourceLimiter() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+		} else if !reflect.DeepEqual(m.extractResourceLimiter(got.GetResourceLimiter()), expected) {
+			m.t.Errorf("AutoScalerServerApp.GetResourceLimiter() = %v, want %v", got.GetResourceLimiter(), expected)
+		}
 	}
 }
 
-func TestAutoScalerServer_Cleanup(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, true)
+func (m *serverTest) Cleanup() {
+	s, err := m.newTestServer(true, false)
 
-	if assert.NoError(t, err) {
-		t.Run("Cleanup", func(t *testing.T) {
-			request := &apigrpc.CloudProviderServiceRequest{
-				ProviderID: testProviderID,
-			}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.CloudProviderServiceRequest{
+			ProviderID: s.configuration.ServiceIdentifier,
+		}
 
-			if got, err := s.Cleanup(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.Cleanup() error = %v", err)
-			} else if got.GetError() != nil {
-				t.Errorf("AutoScalerServerApp.Cleanup() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			}
-		})
+		if got, err := s.Cleanup(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.Cleanup() error = %v", err)
+		} else if got.GetError() != nil && strings.HasSuffix(got.GetError().GetReason(), "is not provisionned by me") == false {
+			m.t.Errorf("AutoScalerServerApp.Cleanup() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+		}
 	}
 }
 
-func TestAutoScalerServer_Refresh(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, true)
+func (m *serverTest) Refresh() {
+	s, err := m.newTestServer(true, false)
 
-	if assert.NoError(t, err) {
-		t.Run("Refresh", func(t *testing.T) {
-			request := &apigrpc.CloudProviderServiceRequest{
-				ProviderID: testProviderID,
-			}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.CloudProviderServiceRequest{
+			ProviderID: s.configuration.ServiceIdentifier,
+		}
 
-			if got, err := s.Refresh(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.Refresh() error = %v", err)
-			} else if got.GetError() != nil {
-				t.Errorf("AutoScalerServerApp.Refresh() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			}
-		})
+		if got, err := s.Refresh(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.Refresh() error = %v", err)
+		} else if got.GetError() != nil {
+			m.t.Errorf("AutoScalerServerApp.Refresh() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+		}
 	}
 }
 
-func TestAutoScalerServer_MaxSize(t *testing.T) {
-	s, ng, ctx, err := newTestServer(true, false)
+func (m *serverTest) MaxSize() {
+	s, err := m.newTestServer(true, false)
 
-	if assert.NoError(t, err) {
-		t.Run("MaxSize", func(t *testing.T) {
-			request := &apigrpc.NodeGroupServiceRequest{
-				ProviderID:  testProviderID,
-				NodeGroupID: testGroupID,
-			}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.NodeGroupServiceRequest{
+			ProviderID:  s.configuration.ServiceIdentifier,
+			NodeGroupID: m.getNodeGroupID(),
+		}
 
-			if got, err := s.MaxSize(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.MaxSize() error = %v", err)
-			} else if got.GetMaxSize() != int32(ng.MaxNodeSize) {
-				t.Errorf("AutoScalerServerApp.MaxSize() = %v, want %v", got.GetMaxSize(), ng.MaxNodeSize)
-			}
-		})
+		if got, err := s.MaxSize(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.MaxSize() error = %v", err)
+		} else if got.GetMaxSize() != int32(s.configuration.MaxNode) {
+			m.t.Errorf("AutoScalerServerApp.MaxSize() = %v, want %v", got.GetMaxSize(), s.configuration.MaxNode)
+		}
 	}
 }
 
-func TestAutoScalerServer_MinSize(t *testing.T) {
-	s, ng, ctx, err := newTestServer(true, false)
+func (m *serverTest) MinSize() {
+	s, err := m.newTestServer(true, false)
 
-	if assert.NoError(t, err) {
-		t.Run("MinSize", func(t *testing.T) {
-			request := &apigrpc.NodeGroupServiceRequest{
-				ProviderID:  testProviderID,
-				NodeGroupID: testGroupID,
-			}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.NodeGroupServiceRequest{
+			ProviderID:  s.configuration.ServiceIdentifier,
+			NodeGroupID: m.getNodeGroupID(),
+		}
 
-			if got, err := s.MinSize(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.MinSize() error = %v", err)
-			} else if got.GetMinSize() != int32(ng.MinNodeSize) {
-				t.Errorf("AutoScalerServerApp.MinSize() = %v, want %v", got.GetMinSize(), ng.MinNodeSize)
-			}
-		})
+		if got, err := s.MinSize(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.MinSize() error = %v", err)
+		} else if got.GetMinSize() != int32(s.configuration.MinNode) {
+			m.t.Errorf("AutoScalerServerApp.MinSize() = %v, want %v", got.GetMinSize(), s.configuration.MinNode)
+		}
 	}
 }
 
-func TestAutoScalerServer_TargetSize(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, true)
+func (m *serverTest) TargetSize() {
+	s, err := m.newTestServer(true, true)
 
-	if assert.NoError(t, err) {
-		t.Run("TargetSize", func(t *testing.T) {
-			request := &apigrpc.NodeGroupServiceRequest{
-				ProviderID:  testProviderID,
-				NodeGroupID: testGroupID,
-			}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.NodeGroupServiceRequest{
+			ProviderID:  s.configuration.ServiceIdentifier,
+			NodeGroupID: m.getNodeGroupID(),
+		}
 
-			if got, err := s.TargetSize(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.TargetSize() error = %v", err)
-			} else if got.GetError() != nil {
-				t.Errorf("AutoScalerServerApp.TargetSize() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else if got.GetTargetSize() != 1 {
-				t.Errorf("AutoScalerServerApp.TargetSize() = %v, want %v", got.GetTargetSize(), 1)
-			}
-		})
+		if got, err := s.TargetSize(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.TargetSize() error = %v", err)
+		} else if got.GetError() != nil {
+			m.t.Errorf("AutoScalerServerApp.TargetSize() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+		} else if got.GetTargetSize() != 1 {
+			m.t.Errorf("AutoScalerServerApp.TargetSize() = %v, want %v", got.GetTargetSize(), 1)
+		}
 	}
 }
 
-func TestAutoScalerServer_IncreaseSize(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, false)
+func (m *serverTest) IncreaseSize() {
+	s, err := m.newTestServer(true, false)
 
-	if assert.NoError(t, err) {
-		t.Run("IncreaseSize", func(t *testing.T) {
-			request := &apigrpc.IncreaseSizeRequest{
-				ProviderID:  testProviderID,
-				NodeGroupID: testGroupID,
-				Delta:       1,
-			}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.IncreaseSizeRequest{
+			ProviderID:  s.configuration.ServiceIdentifier,
+			NodeGroupID: m.getNodeGroupID(),
+			Delta:       1,
+		}
 
-			if got, err := s.IncreaseSize(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.IncreaseSize() error = %v", err)
-			} else if got.GetError() != nil {
-				t.Errorf("AutoScalerServerApp.IncreaseSize() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			}
-		})
+		if got, err := s.IncreaseSize(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.IncreaseSize() error = %v", err)
+		} else if got.GetError() != nil {
+			m.t.Errorf("AutoScalerServerApp.IncreaseSize() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+		}
 	}
 }
 
-func TestAutoScalerServer_DeleteNodes(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, true)
+func (m *serverTest) DeleteNodes() {
+	launchVMName := m.getLaunchedVMName()
+	s, err := m.newTestServer(true, true, launchVMName)
 
-	if assert.NoError(t, err) {
-		t.Run("DeleteNodes", func(t *testing.T) {
-			request := &apigrpc.DeleteNodesRequest{
-				ProviderID:  testProviderID,
-				NodeGroupID: testGroupID,
-				Node: []string{
-					utils.ToJSON(
-						apiv1.Node{
-							Spec: apiv1.NodeSpec{
-								ProviderID: fmt.Sprintf("%s://%s/object?type=node&name=%s", testProviderID, testGroupID, testNodeName),
-							},
-						},
-					),
-				},
-			}
+	if assert.NoError(m.t, err) {
+		nodes := []string{utils.ToJSON(s.createFakeNode(launchVMName))}
+		request := &apigrpc.DeleteNodesRequest{
+			ProviderID:  s.configuration.ServiceIdentifier,
+			NodeGroupID: m.getNodeGroupID(),
+			Node:        nodes,
+		}
 
-			if got, err := s.DeleteNodes(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.DeleteNodes() error = %v", err)
-			} else if got.GetError() != nil {
-				t.Errorf("AutoScalerServerApp.DeleteNodes() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			}
-		})
+		if got, err := s.DeleteNodes(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.DeleteNodes() error = %v", err)
+		} else if got.GetError() != nil {
+			m.t.Errorf("AutoScalerServerApp.DeleteNodes() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+		}
 	}
 }
 
-func TestAutoScalerServer_DecreaseTargetSize(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, true)
+func (m *serverTest) DecreaseTargetSize() {
+	s, err := m.newTestServer(true, true)
 
-	if assert.NoError(t, err) {
-		t.Run("DecreaseTargetSize", func(t *testing.T) {
-			request := &apigrpc.DecreaseTargetSizeRequest{
-				ProviderID:  testProviderID,
-				NodeGroupID: testGroupID,
-				Delta:       -1,
-			}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.DecreaseTargetSizeRequest{
+			ProviderID:  s.configuration.ServiceIdentifier,
+			NodeGroupID: m.getNodeGroupID(),
+			Delta:       -1,
+		}
 
-			if got, err := s.DecreaseTargetSize(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.DecreaseTargetSize() error = %v", err)
-			} else if got.GetError() != nil {
-				t.Errorf("AutoScalerServerApp.DecreaseTargetSize() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			}
-		})
+		if got, err := s.DecreaseTargetSize(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.DecreaseTargetSize() error = %v", err)
+		} else if got.GetError() != nil && !strings.HasPrefix(got.GetError().GetReason(), "attempt to delete existing nodes") {
+			m.t.Errorf("AutoScalerServerApp.DecreaseTargetSize() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+		}
 	}
 }
 
-func TestAutoScalerServer_Id(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, false)
+func (m *serverTest) Id() {
+	testGroupID := m.getNodeGroupID()
+	s, err := m.newTestServer(true, false)
 
-	if assert.NoError(t, err) {
-		t.Run("Id", func(t *testing.T) {
-			request := &apigrpc.NodeGroupServiceRequest{
-				ProviderID:  testProviderID,
-				NodeGroupID: testGroupID,
-			}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.NodeGroupServiceRequest{
+			ProviderID:  s.configuration.ServiceIdentifier,
+			NodeGroupID: testGroupID,
+		}
 
-			if got, err := s.Id(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.Id() error = %v", err)
-			} else if got.GetResponse() != testGroupID {
-				t.Errorf("AutoScalerServerApp.Id() = %v, want %v", got, testGroupID)
-			}
-		})
+		if got, err := s.Id(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.Id() error = %v", err)
+		} else if got.GetResponse() != testGroupID {
+			m.t.Errorf("AutoScalerServerApp.Id() = %v, want %v", got, testGroupID)
+		}
 	}
 }
 
-func TestAutoScalerServer_Debug(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, false)
+func (m *serverTest) Debug() {
+	s, err := m.newTestServer(true, false)
 
-	if assert.NoError(t, err) {
-		t.Run("Debug", func(t *testing.T) {
-			request := &apigrpc.NodeGroupServiceRequest{
-				ProviderID:  testProviderID,
-				NodeGroupID: testGroupID,
-			}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.NodeGroupServiceRequest{
+			ProviderID:  s.configuration.ServiceIdentifier,
+			NodeGroupID: m.getNodeGroupID(),
+		}
 
-			if _, err := s.Debug(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.Debug() error = %v", err)
-			}
-		})
+		if _, err := s.Debug(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.Debug() error = %v", err)
+		}
 	}
 }
 
-func extractInstanceID(instances *apigrpc.Instances) []string {
-	r := make([]string, len(instances.GetItems()))
-
-	for i, n := range instances.GetItems() {
-		r[i] = n.GetId()
-	}
-
-	return r
-}
-
-func TestAutoScalerServer_Nodes(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, true)
+func (m *serverTest) Nodes() {
+	s, err := m.newTestServer(true, true)
 
 	expected := []string{
-		fmt.Sprintf("%s://%s/object?type=node&name=%s", testProviderID, testGroupID, testNodeName),
+		fmt.Sprintf("aws://%s/%s", testZone, testInstanceID),
 	}
 
-	if assert.NoError(t, err) {
-		t.Run("Nodes", func(t *testing.T) {
-			request := &apigrpc.NodeGroupServiceRequest{
-				ProviderID:  testProviderID,
-				NodeGroupID: testGroupID,
-			}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.NodeGroupServiceRequest{
+			ProviderID:  s.configuration.ServiceIdentifier,
+			NodeGroupID: m.getNodeGroupID(),
+		}
 
-			if got, err := s.Nodes(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.Nodes() error = %v", err)
-			} else if got.GetError() != nil {
-				t.Errorf("AutoScalerServerApp.Nodes() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else if !reflect.DeepEqual(extractInstanceID(got.GetInstances()), expected) {
-				t.Errorf("AutoScalerServerApp.Nodes() = %v, want %v", extractInstanceID(got.GetInstances()), expected)
-			}
-		})
+		if got, err := s.Nodes(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.Nodes() error = %v", err)
+		} else if got.GetError() != nil {
+			m.t.Errorf("AutoScalerServerApp.Nodes() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+		} else if !reflect.DeepEqual(m.extractInstanceID(got.GetInstances()), expected) {
+			m.t.Errorf("AutoScalerServerApp.Nodes() = %v, want %v", m.extractInstanceID(got.GetInstances()), expected)
+		}
 	}
 }
 
-func TestAutoScalerServer_TemplateNodeInfo(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, true)
+func (m *serverTest) TemplateNodeInfo() {
+	s, err := m.newTestServer(true, true)
 
-	if assert.NoError(t, err) {
-		t.Run("TemplateNodeInfo", func(t *testing.T) {
-			request := &apigrpc.NodeGroupServiceRequest{
-				ProviderID:  testProviderID,
-				NodeGroupID: testGroupID,
-			}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.NodeGroupServiceRequest{
+			ProviderID:  s.configuration.ServiceIdentifier,
+			NodeGroupID: m.getNodeGroupID(),
+		}
 
-			if got, err := s.TemplateNodeInfo(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.TemplateNodeInfo() error = %v", err)
-			} else if got.GetError() != nil {
-				t.Errorf("AutoScalerServerApp.TemplateNodeInfo() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			}
-		})
+		if got, err := s.TemplateNodeInfo(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.TemplateNodeInfo() error = %v", err)
+		} else if got.GetError() != nil {
+			m.t.Errorf("AutoScalerServerApp.TemplateNodeInfo() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+		}
 	}
 }
 
-func TestAutoScalerServer_Exist(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, false)
+func (m *serverTest) Exist() {
+	s, err := m.newTestServer(true, false)
 
-	if assert.NoError(t, err) {
-		t.Run("Exists", func(t *testing.T) {
-			request := &apigrpc.NodeGroupServiceRequest{
-				ProviderID:  testProviderID,
-				NodeGroupID: testGroupID,
-			}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.NodeGroupServiceRequest{
+			ProviderID:  s.configuration.ServiceIdentifier,
+			NodeGroupID: m.getNodeGroupID(),
+		}
 
-			if got, err := s.Exist(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.Exist() error = %v", err)
-			} else if got.GetExists() == false {
-				t.Errorf("AutoScalerServerApp.Exist() = %v", got.GetExists())
-			}
-		})
+		if got, err := s.Exist(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.Exist() error = %v", err)
+		} else if got.GetExists() == false {
+			m.t.Errorf("AutoScalerServerApp.Exist() = %v", got.GetExists())
+		}
 	}
 }
 
-func TestAutoScalerServer_Create(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, false)
+func (m *serverTest) Create() {
+	testGroupID := m.getNodeGroupID()
+	s, err := m.newTestServer(true, false)
 
-	if assert.NoError(t, err) {
-		t.Run("Create", func(t *testing.T) {
-			request := &apigrpc.NodeGroupServiceRequest{
-				ProviderID:  testProviderID,
-				NodeGroupID: testGroupID,
-			}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.NodeGroupServiceRequest{
+			ProviderID:  s.configuration.ServiceIdentifier,
+			NodeGroupID: testGroupID,
+		}
 
-			if got, err := s.Create(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.Create() error = %v", err)
-			} else if got.GetError() != nil {
-				t.Errorf("AutoScalerServerApp.Create() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else if got.GetNodeGroup().GetId() != testGroupID {
-				t.Errorf("AutoScalerServerApp.Create() = %v, want %v", got.GetNodeGroup().GetId(), testGroupID)
-			}
-		})
+		if got, err := s.Create(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.Create() error = %v", err)
+		} else if got.GetError() != nil {
+			m.t.Errorf("AutoScalerServerApp.Create() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+		} else if got.GetNodeGroup().GetId() != testGroupID {
+			m.t.Errorf("AutoScalerServerApp.Create() = %v, want %v", got.GetNodeGroup().GetId(), testGroupID)
+		}
 	}
 }
 
-func TestAutoScalerServer_Delete(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, false)
+func (m *serverTest) Delete() {
+	s, err := m.newTestServer(true, false)
 
-	if assert.NoError(t, err) {
-		t.Run("Delete", func(t *testing.T) {
-			request := &apigrpc.NodeGroupServiceRequest{
-				ProviderID:  testProviderID,
-				NodeGroupID: testGroupID,
-			}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.NodeGroupServiceRequest{
+			ProviderID:  s.configuration.ServiceIdentifier,
+			NodeGroupID: m.getNodeGroupID(),
+		}
 
-			if got, err := s.Delete(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.Delete() error = %v", err)
-			} else if got.GetError() != nil {
-				t.Errorf("AutoScalerServerApp.Delete() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			}
-		})
+		if got, err := s.Delete(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.Delete() error = %v", err)
+		} else if got.GetError() != nil {
+			m.t.Errorf("AutoScalerServerApp.Delete() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+		}
 	}
 }
 
-func TestAutoScalerServer_Autoprovisioned(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, false)
+func (m *serverTest) Autoprovisioned() {
+	s, err := m.newTestServer(true, false)
 
-	if assert.NoError(t, err) {
-		t.Run("Autoprovisioned", func(t *testing.T) {
-			request := &apigrpc.NodeGroupServiceRequest{
-				ProviderID:  testProviderID,
-				NodeGroupID: testGroupID,
-			}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.NodeGroupServiceRequest{
+			ProviderID:  s.configuration.ServiceIdentifier,
+			NodeGroupID: m.getNodeGroupID(),
+		}
 
-			if got, err := s.Autoprovisioned(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.Autoprovisioned() error = %v", err)
-			} else if got.GetAutoprovisioned() == false {
-				t.Errorf("AutoScalerServerApp.Autoprovisioned() = %v, want true", got.GetAutoprovisioned())
-			}
-		})
+		if got, err := s.Autoprovisioned(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.Autoprovisioned() error = %v", err)
+		} else if got.GetAutoprovisioned() == false {
+			m.t.Errorf("AutoScalerServerApp.Autoprovisioned() = %v, want true", got.GetAutoprovisioned())
+		}
 	}
 }
 
-func TestAutoScalerServer_Belongs(t *testing.T) {
+func (m *serverTest) Belongs() {
+	s, err := m.newTestServer(true, true)
+
 	tests := []struct {
 		name    string
 		request *apigrpc.BelongsRequest
@@ -569,15 +491,9 @@ func TestAutoScalerServer_Belongs(t *testing.T) {
 			name: "Belongs",
 			want: true,
 			request: &apigrpc.BelongsRequest{
-				ProviderID:  testProviderID,
-				NodeGroupID: testGroupID,
-				Node: utils.ToJSON(
-					apiv1.Node{
-						Spec: apiv1.NodeSpec{
-							ProviderID: fmt.Sprintf("%s://%s/object?type=node&name=%s", testProviderID, testGroupID, testNodeName),
-						},
-					},
-				),
+				ProviderID:  s.configuration.ServiceIdentifier,
+				NodeGroupID: m.getNodeGroupID(),
+				Node:        utils.ToJSON(s.createFakeNode()),
 			},
 		},
 		{
@@ -585,92 +501,244 @@ func TestAutoScalerServer_Belongs(t *testing.T) {
 			want:    false,
 			wantErr: false,
 			request: &apigrpc.BelongsRequest{
-				ProviderID:  testProviderID,
-				NodeGroupID: testGroupID,
-				Node: utils.ToJSON(
-					apiv1.Node{
-						Spec: apiv1.NodeSpec{
-							ProviderID: fmt.Sprintf("%s://%s/object?type=node&name=%s", testProviderID, testGroupID, "wrong-name"),
-						},
-					},
-				),
+				ProviderID:  s.configuration.ServiceIdentifier,
+				NodeGroupID: m.getNodeGroupID(),
+				Node:        utils.ToJSON(s.createFakeNode("wrong-name-vm-test")),
 			},
 		},
 	}
 
-	s, _, ctx, err := newTestServer(true, true)
-
-	if assert.NoError(t, err) {
+	if assert.NoError(m.t, err) {
 		for _, test := range tests {
-			t.Run(test.name, func(t *testing.T) {
 
-				got, err := s.Belongs(ctx, test.request)
+			got, err := s.Belongs(context.TODO(), test.request)
 
-				if (err != nil) != test.wantErr {
-					t.Errorf("AutoScalerServerApp.Belongs() error = %v", err)
-				} else if got.GetError() != nil {
-					t.Errorf("AutoScalerServerApp.Belongs() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-				} else if got.GetBelongs() != test.want {
-					t.Errorf("AutoScalerServerApp.Belongs() = %v, want %v", got.GetBelongs(), test.want)
-				}
-			})
+			if (err != nil) != test.wantErr {
+				m.t.Errorf("AutoScalerServerApp.Belongs() error = %v", err)
+			} else if got.GetError() != nil {
+				m.t.Errorf("AutoScalerServerApp.Belongs() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+			} else if got.GetBelongs() != test.want {
+				m.t.Errorf("AutoScalerServerApp.Belongs() = %v, want %v", got.GetBelongs(), test.want)
+			}
 		}
 	}
 }
 
-func TestAutoScalerServer_NodePrice(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, true)
+func (m *serverTest) NodePrice() {
+	s, err := m.newTestServer(true, true)
 
-	if assert.NoError(t, err) {
-		t.Run("Node Price", func(t *testing.T) {
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.NodePriceRequest{
+			ProviderID: s.configuration.ServiceIdentifier,
+			StartTime:  time.Now().Unix(),
+			EndTime:    time.Now().Add(time.Hour).Unix(),
+			Node:       utils.ToJSON(s.createFakeNode()),
+		}
 
-			request := &apigrpc.NodePriceRequest{
-				ProviderID: testProviderID,
-				StartTime:  time.Now().Unix(),
-				EndTime:    time.Now().Add(time.Hour).Unix(),
-				Node: utils.ToJSON(apiv1.Node{
-					Spec: apiv1.NodeSpec{
-						ProviderID: fmt.Sprintf("%s://%s/object?type=node&name=%s", testProviderID, testGroupID, testNodeName),
-					},
-				},
-				),
-			}
-
-			if got, err := s.NodePrice(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.NodePrice() error = %v", err)
-			} else if got.GetError() != nil {
-				t.Errorf("AutoScalerServerApp.NodePrice() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else if got.GetPrice() != 0 {
-				t.Errorf("AutoScalerServerApp.NodePrice() = %v, want %v", got.GetPrice(), 0)
-			}
-		})
+		if got, err := s.NodePrice(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.NodePrice() error = %v", err)
+		} else if got.GetError() != nil {
+			m.t.Errorf("AutoScalerServerApp.NodePrice() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+		} else if got.GetPrice() != 0 {
+			m.t.Errorf("AutoScalerServerApp.NodePrice() = %v, want %v", got.GetPrice(), 0)
+		}
 	}
 }
 
-func TestAutoScalerServer_PodPrice(t *testing.T) {
-	s, _, ctx, err := newTestServer(true, true)
+func (m *serverTest) PodPrice() {
+	s, err := m.newTestServer(true, true)
 
-	if assert.NoError(t, err) {
-		t.Run("Pod Price", func(t *testing.T) {
-			request := &apigrpc.PodPriceRequest{
-				ProviderID: testProviderID,
-				StartTime:  time.Now().Unix(),
-				EndTime:    time.Now().Add(time.Hour).Unix(),
-				Pod: utils.ToJSON(apiv1.Pod{
-					Spec: apiv1.PodSpec{
-						NodeName: testNodeName,
-					},
-				},
-				),
-			}
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.PodPriceRequest{
+			ProviderID: s.configuration.ServiceIdentifier,
+			StartTime:  time.Now().Unix(),
+			EndTime:    time.Now().Add(time.Hour).Unix(),
+			Pod:        utils.ToJSON(s.createFakeNode()),
+		}
 
-			if got, err := s.PodPrice(ctx, request); err != nil {
-				t.Errorf("AutoScalerServerApp.PodPrice() error = %v", err)
-			} else if got.GetError() != nil {
-				t.Errorf("AutoScalerServerApp.PodPrice() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else if got.GetPrice() != 0 {
-				t.Errorf("AutoScalerServerApp.PodPrice() = %v, want %v", got.GetPrice(), 0)
-			}
-		})
+		if got, err := s.PodPrice(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.PodPrice() error = %v", err)
+		} else if got.GetError() != nil {
+			m.t.Errorf("AutoScalerServerApp.PodPrice() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+		} else if got.GetPrice() != 0 {
+			m.t.Errorf("AutoScalerServerApp.PodPrice() = %v, want %v", got.GetPrice(), 0)
+		}
 	}
+}
+
+func (m *serverTest) extractInstanceID(instances *apigrpc.Instances) []string {
+	r := make([]string, len(instances.GetItems()))
+
+	for i, n := range instances.GetItems() {
+		r[i] = n.GetId()
+	}
+
+	return r
+}
+
+func (m *serverTest) extractNodeGroup(nodeGroups []*apigrpc.NodeGroup) []string {
+	r := make([]string, len(nodeGroups))
+
+	for i, n := range nodeGroups {
+		r[i] = n.Id
+	}
+
+	return r
+}
+
+func (m *serverTest) extractResourceLimiter(res *apigrpc.ResourceLimiter) *types.ResourceLimiter {
+	r := &types.ResourceLimiter{
+		MinLimits: res.MinLimits,
+		MaxLimits: res.MaxLimits,
+	}
+
+	return r
+}
+
+func (m *serverTest) extractAvailableMachineTypes(availableMachineTypes *apigrpc.AvailableMachineTypes) []string {
+	r := make([]string, len(availableMachineTypes.MachineType))
+
+	copy(r, availableMachineTypes.MachineType)
+
+	sort.Strings(r)
+
+	return r
+}
+
+func (m *serverTest) newTestServer(addNodeGroup, addTestNode bool, nodeName ...string) (*autoScalerServerAppTest, error) {
+
+	if ng, err := m.newTestNodeGroup(); err == nil {
+		s := &autoScalerServerAppTest{
+			ng: ng,
+			AutoScalerServerApp: AutoScalerServerApp{
+				ResourceLimiter: &types.ResourceLimiter{
+					MinLimits: map[string]int64{constantes.ResourceNameCores: 1, constantes.ResourceNameMemory: 10000000},
+					MaxLimits: map[string]int64{constantes.ResourceNameCores: 5, constantes.ResourceNameMemory: 100000000},
+				},
+				Groups:        map[string]*AutoScalerServerNodeGroup{},
+				kubeClient:    m,
+				configuration: ng.configuration,
+			},
+		}
+
+		if addNodeGroup {
+			s.Groups[ng.NodeGroupIdentifier] = &ng.AutoScalerServerNodeGroup
+
+			if addTestNode {
+				ng.createTestNode(nodeName...)
+			}
+		}
+
+		return s, nil
+	} else {
+		return nil, err
+	}
+}
+
+func createServerTest(t *testing.T) *serverTest {
+	return &serverTest{
+		baseTest: baseTest{
+			t: t,
+		},
+	}
+}
+
+func TestServer_NodeGroups(t *testing.T) {
+	createServerTest(t).NodeGroups()
+}
+
+func TestServer_NodeGroupForNode(t *testing.T) {
+	createServerTest(t).NodeGroupForNode()
+}
+
+func TestServer_Pricing(t *testing.T) {
+	createServerTest(t).Pricing()
+}
+
+func TestServer_GetAvailableMachineTypes(t *testing.T) {
+	createServerTest(t).GetAvailableMachineTypes()
+}
+
+func TestServer_NewNodeGroup(t *testing.T) {
+	createServerTest(t).NewNodeGroup()
+}
+
+func TestServer_GetResourceLimiter(t *testing.T) {
+	createServerTest(t).GetResourceLimiter()
+}
+
+func TestServer_Cleanup(t *testing.T) {
+	createServerTest(t).Cleanup()
+}
+
+func TestServer_Refresh(t *testing.T) {
+	createServerTest(t).Refresh()
+}
+
+func TestServer_MaxSize(t *testing.T) {
+	createServerTest(t).MaxSize()
+}
+
+func TestServer_MinSize(t *testing.T) {
+	createServerTest(t).MinSize()
+}
+
+func TestServer_TargetSize(t *testing.T) {
+	createServerTest(t).TargetSize()
+}
+
+func TestServer_IncreaseSize(t *testing.T) {
+	createServerTest(t).IncreaseSize()
+}
+
+func TestServer_DecreaseTargetSize(t *testing.T) {
+	createServerTest(t).DecreaseTargetSize()
+}
+
+func TestServer_DeleteNodes(t *testing.T) {
+	createServerTest(t).DeleteNodes()
+}
+
+func TestServer_Id(t *testing.T) {
+	createServerTest(t).Id()
+}
+
+func TestServer_Debug(t *testing.T) {
+	createServerTest(t).Debug()
+}
+
+func TestServer_Nodes(t *testing.T) {
+	createServerTest(t).Nodes()
+}
+
+func TestServer_TemplateNodeInfo(t *testing.T) {
+	createServerTest(t).TemplateNodeInfo()
+}
+
+func TestServer_Exist(t *testing.T) {
+	createServerTest(t).Exist()
+}
+
+func TestServer_Create(t *testing.T) {
+	createServerTest(t).Create()
+}
+
+func TestServer_Delete(t *testing.T) {
+	createServerTest(t).Delete()
+}
+
+func TestServer_Autoprovisioned(t *testing.T) {
+	createServerTest(t).Autoprovisioned()
+}
+
+func TestServer_Belongs(t *testing.T) {
+	createServerTest(t).Belongs()
+}
+
+func TestServer_NodePrice(t *testing.T) {
+	createServerTest(t).NodePrice()
+}
+
+func TestServer_PodPrice(t *testing.T) {
+	createServerTest(t).PodPrice()
 }

@@ -62,12 +62,11 @@ const (
 // AutoScalerServerNode Describe a AutoScaler VM
 // Node name and instance name could be differ when using AWS cloud provider
 type AutoScalerServerNode struct {
-	ProviderID       string                    `json:"providerID"`
 	NodeGroupID      string                    `json:"group"`
 	InstanceName     string                    `json:"instance-name"`
 	NodeName         string                    `json:"node-name"`
 	NodeIndex        int                       `json:"index"`
-	UID              uid.UID                   `json:"crd-uid"`
+	CRDUID           uid.UID                   `json:"crd-uid"`
 	Memory           int                       `json:"memory"`
 	CPU              int                       `json:"cpu"`
 	DiskSize         int                       `json:"diskSize"`
@@ -78,8 +77,8 @@ type AutoScalerServerNode struct {
 	NodeType         AutoScalerServerNodeType  `json:"type"`
 	ControlPlaneNode bool                      `json:"control-plane,omitempty"`
 	AllowDeployment  bool                      `json:"allow-deployment,omitempty"`
-	ExtraLabels      KubernetesLabel           `json:"labels,omitempty"`
-	ExtraAnnotations KubernetesLabel           `json:"annotations,omitempty"`
+	ExtraLabels      types.KubernetesLabel     `json:"labels,omitempty"`
+	ExtraAnnotations types.KubernetesLabel     `json:"annotations,omitempty"`
 	awsConfig        *aws.Configuration
 	runningInstance  *aws.Ec2Instance
 	desiredENI       *aws.UserDefinedNetworkInterface
@@ -94,6 +93,8 @@ func (vm *AutoScalerServerNode) recopyEtcdSslFilesIfNeeded() error {
 	var err error
 
 	if vm.ControlPlaneNode || *vm.serverConfig.UseExternalEtdc {
+		glog.Infof("Recopy Etcd ssl files for instance: %s in node group: %s", vm.InstanceName, vm.NodeGroupID)
+
 		if err = utils.Scp(vm.serverConfig.SSH, vm.IPAddress, vm.serverConfig.ExtSourceEtcdSslDir, "."); err != nil {
 			glog.Errorf("scp failed: %v", err)
 		} else if _, err = utils.Sudo(vm.serverConfig.SSH, vm.IPAddress, vm.awsConfig.Timeout, fmt.Sprintf("mkdir -p %s", vm.serverConfig.ExtDestinationEtcdSslDir)); err != nil {
@@ -112,6 +113,8 @@ func (vm *AutoScalerServerNode) recopyKubernetesPKIIfNeeded() error {
 	var err error
 
 	if vm.ControlPlaneNode {
+		glog.Infof("Recopy PKI for instance: %s in node group: %s", vm.InstanceName, vm.NodeGroupID)
+
 		if err = utils.Scp(vm.serverConfig.SSH, vm.IPAddress, vm.serverConfig.KubernetesPKISourceDir, "."); err != nil {
 			glog.Errorf("scp failed: %v", err)
 		} else if _, err = utils.Sudo(vm.serverConfig.SSH, vm.IPAddress, vm.awsConfig.Timeout, fmt.Sprintf("mkdir -p %s", vm.serverConfig.KubernetesPKIDestDir)); err != nil {
@@ -128,6 +131,8 @@ func (vm *AutoScalerServerNode) recopyKubernetesPKIIfNeeded() error {
 
 func (vm *AutoScalerServerNode) kubeAdmJoin() error {
 	kubeAdm := vm.serverConfig.KubeAdm
+
+	glog.Infof("Register node in cluster for instance: %s in node group: %s", vm.InstanceName, vm.NodeGroupID)
 
 	args := []string{
 		"kubeadm",
@@ -173,32 +178,20 @@ func (vm *AutoScalerServerNode) retrieveNodeInfo(c types.ClientGenerator) error 
 	return nil
 }
 
-func (vm *AutoScalerServerNode) setNodeLabels(c types.ClientGenerator, nodeLabels, systemLabels KubernetesLabel) error {
-	labels := KubernetesLabel{
-		constantes.NodeLabelGroupName: vm.NodeGroupID,
+func (vm *AutoScalerServerNode) setNodeLabels(c types.ClientGenerator, nodeLabels, systemLabels types.KubernetesLabel) error {
+	topology := types.KubernetesLabel{
+		constantes.NodeLabelTopologyRegion: *vm.runningInstance.Region,
+		constantes.NodeLabelTopologyZone:   *vm.runningInstance.Zone,
 	}
 
-	// Append extras arguments
-	for k, v := range nodeLabels {
-		labels[k] = v
-	}
-
-	for k, v := range systemLabels {
-		labels[k] = v
-	}
+	labels := utils.MergeKubernetesLabel(nodeLabels, topology, systemLabels, vm.ExtraLabels)
 
 	if err := c.LabelNode(vm.NodeName, labels); err != nil {
 		return fmt.Errorf(constantes.ErrLabelNodeReturnError, vm.NodeName, err)
 	}
 
-	if len(vm.ExtraLabels) > 0 {
-		if err := c.LabelNode(vm.NodeName, vm.ExtraLabels); err != nil {
-			return fmt.Errorf(constantes.ErrLabelNodeReturnError, vm.NodeName, err)
-		}
-	}
-
-	annotations := KubernetesLabel{
-		constantes.NodeLabelGroupName:             vm.NodeGroupID,
+	annotations := types.KubernetesLabel{
+		constantes.AnnotationNodeGroupName:        vm.NodeGroupID,
 		constantes.AnnotationScaleDownDisabled:    strconv.FormatBool(vm.NodeType != AutoScalerServerNodeAutoscaled),
 		constantes.AnnotationNodeAutoProvisionned: strconv.FormatBool(vm.NodeType == AutoScalerServerNodeAutoscaled),
 		constantes.AnnotationNodeManaged:          strconv.FormatBool(vm.NodeType == AutoScalerServerNodeManaged),
@@ -207,15 +200,10 @@ func (vm *AutoScalerServerNode) setNodeLabels(c types.ClientGenerator, nodeLabel
 		constantes.AnnotationInstanceID:           *vm.runningInstance.InstanceID,
 	}
 
+	annotations = utils.MergeKubernetesLabel(annotations, vm.ExtraAnnotations)
+
 	if err := c.AnnoteNode(vm.NodeName, annotations); err != nil {
 		return fmt.Errorf(constantes.ErrAnnoteNodeReturnError, vm.NodeName, err)
-	}
-
-	if len(vm.ExtraAnnotations) > 0 {
-		if err := c.AnnoteNode(vm.NodeName, vm.ExtraAnnotations); err != nil {
-			return fmt.Errorf(constantes.ErrAnnoteNodeReturnError, vm.NodeName, err)
-		}
-
 	}
 
 	if vm.ControlPlaneNode && vm.AllowDeployment {
@@ -266,13 +254,23 @@ func (vm *AutoScalerServerNode) CheckIfIPIsReady(nodename, address string) error
 	return nil
 }
 
+func (vm *AutoScalerServerNode) WaitForIP() (*string, error) {
+	glog.Infof("Wait IP ready for instance: %s in node group: %s", vm.InstanceName, vm.NodeGroupID)
+
+	return vm.runningInstance.WaitForIP(vm)
+}
+
 func (vm *AutoScalerServerNode) registerDNS(address string) error {
 	var err error
 
 	aws := vm.awsConfig
 
-	if aws.Network.ZoneID != nil {
-		err = vm.runningInstance.RegisterDNS(aws.GetRoute53AccessKey(), aws.GetRoute53SecretKey(), aws.GetRoute53AccessToken(), aws.GetRoute53Profile(), aws.GetRoute53Region(), *aws.Network.ZoneID, fmt.Sprintf("%s.%s", vm.InstanceName, *aws.Network.PrivateZoneName), address, false)
+	if len(aws.Network.ZoneID) > 0 {
+		hostname := fmt.Sprintf("%s.%s", vm.InstanceName, aws.Network.PrivateZoneName)
+
+		glog.Infof("Register route53 entry for instance %s, node group: %s, hostname: %s with IP:%s", vm.InstanceName, vm.NodeGroupID, hostname, address)
+
+		err = vm.runningInstance.RegisterDNS(aws, hostname, address, vm.serverConfig.SSH.TestMode)
 	}
 
 	return err
@@ -283,8 +281,12 @@ func (vm *AutoScalerServerNode) unregisterDNS(address string) error {
 
 	aws := vm.awsConfig
 
-	if aws.Network.ZoneID != nil {
-		err = vm.runningInstance.UnRegisterDNS(aws.GetRoute53AccessKey(), aws.GetRoute53SecretKey(), aws.GetRoute53AccessToken(), aws.GetRoute53Profile(), aws.GetRoute53Region(), *aws.Network.ZoneID, fmt.Sprintf("%s.%s", vm.InstanceName, *aws.Network.PrivateZoneName), address, false)
+	if len(aws.Network.ZoneID) > 0 {
+		hostname := fmt.Sprintf("%s.%s", vm.InstanceName, aws.Network.PrivateZoneName)
+
+		glog.Infof("Unregister route53 entry for instance %s, node group: %s, hostname: %s with IP:%s", vm.InstanceName, vm.NodeGroupID, hostname, address)
+
+		err = vm.runningInstance.UnRegisterDNS(aws, hostname, false)
 	}
 
 	return err
@@ -293,20 +295,23 @@ func (vm *AutoScalerServerNode) unregisterDNS(address string) error {
 func (vm *AutoScalerServerNode) kubeletDefault() *string {
 	var maxPods = vm.serverConfig.MaxPods
 	var kubeletExtraArgs string
+	var cloudProvider string
 
 	if maxPods == 0 {
 		maxPods = 110
 	}
 
-	if vm.serverConfig.CloudProvider == "aws" {
-		kubeletExtraArgs = fmt.Sprintf("KUBELET_EXTRA_ARGS=\\\"$KUBELET_EXTRA_ARGS --cloud-provider=aws --max-pods=%d --node-ip=$LOCAL_IP --provider-id=%s\\\"", maxPods, vm.ProviderID)
-	} else {
-		kubeletExtraArgs = fmt.Sprintf("KUBELET_EXTRA_ARGS=\\\"$KUBELET_EXTRA_ARGS --max-pods=%d --node-ip=$LOCAL_IP --provider-id=%s\\\"", maxPods, vm.ProviderID)
+	if len(vm.serverConfig.CloudProvider) > 0 {
+		cloudProvider = fmt.Sprintf("--cloud-provider=%s", vm.serverConfig.CloudProvider)
 	}
+
+	kubeletExtraArgs = fmt.Sprintf("KUBELET_EXTRA_ARGS=\\\"$KUBELET_EXTRA_ARGS --max-pods=%d --node-ip=$LOCAL_IP --provider-id=aws://$ZONEID/$INSTANCEID %s\\\"", maxPods, cloudProvider)
 
 	kubeletDefault := []string{
 		"#!/bin/bash",
 		"source /etc/default/kubelet",
+		"INSTANCEID=$(curl http://169.254.169.254/latest/meta-data/instance-id)",
+		"ZONEID=$(curl http://169.254.169.254/latest/meta-data/placement/availability-zone)",
 		"LOCAL_IP=$(curl http://169.254.169.254/latest/meta-data/local-ipv4)",
 		"echo \"" + kubeletExtraArgs + "\" > /etc/default/kubelet",
 		"systemctl restart kubelet",
@@ -317,7 +322,7 @@ func (vm *AutoScalerServerNode) kubeletDefault() *string {
 	return &result
 }
 
-func (vm *AutoScalerServerNode) launchVM(c types.ClientGenerator, nodeLabels, systemLabels KubernetesLabel) error {
+func (vm *AutoScalerServerNode) launchVM(c types.ClientGenerator, nodeLabels, systemLabels types.KubernetesLabel) error {
 	glog.Debugf("AutoScalerNode::launchVM, node:%s", vm.InstanceName)
 
 	var err error
@@ -340,7 +345,7 @@ func (vm *AutoScalerServerNode) launchVM(c types.ClientGenerator, nodeLabels, sy
 
 		err = fmt.Errorf(constantes.ErrUnableToLaunchVM, vm.InstanceName, err)
 
-	} else if address, err = vm.runningInstance.WaitForIP(vm); err != nil {
+	} else if address, err = vm.WaitForIP(); err != nil {
 
 		err = fmt.Errorf(constantes.ErrStartVMFailed, vm.InstanceName, err)
 
@@ -368,7 +373,7 @@ func (vm *AutoScalerServerNode) launchVM(c types.ClientGenerator, nodeLabels, sy
 
 		err = fmt.Errorf(constantes.ErrKubeAdmJoinFailed, vm.InstanceName, err)
 
-	} else if err = c.SetProviderID(vm.NodeName, vm.ProviderID); err != nil {
+	} else if err = c.SetProviderID(vm.NodeName, vm.generateProviderID()); err != nil {
 
 		err = fmt.Errorf(constantes.ErrProviderIDNotConfigured, vm.NodeName, err)
 
@@ -436,6 +441,7 @@ func (vm *AutoScalerServerNode) startVM(c types.ClientGenerator) error {
 
 			vm.State = AutoScalerServerNodeStateRunning
 		}
+
 	} else if state != AutoScalerServerNodeStateRunning {
 		err = fmt.Errorf(constantes.ErrStartVMFailed, vm.InstanceName, fmt.Sprintf("Unexpected state: %d", state))
 	}
@@ -539,8 +545,11 @@ func (vm *AutoScalerServerNode) deleteVM(c types.ClientGenerator) error {
 	if err == nil {
 		glog.Infof("Deleted VM:%s", vm.InstanceName)
 		vm.State = AutoScalerServerNodeStateDeleted
-	} else {
+	} else if !strings.HasPrefix(err.Error(), "InvalidInstanceID.NotFound: The instance ID") {
 		glog.Errorf("Could not delete VM:%s. Reason: %s", vm.InstanceName, err)
+	} else {
+		glog.Warnf("Could not delete VM:%s. does not exist", vm.InstanceName)
+		err = fmt.Errorf(constantes.ErrVMNotFound, vm.InstanceName)
 	}
 
 	return err
@@ -575,6 +584,10 @@ func (vm *AutoScalerServerNode) statusVM() (AutoScalerServerNodeState, error) {
 	}
 
 	return AutoScalerServerNodeStateUndefined, fmt.Errorf(constantes.ErrAutoScalerInfoNotFound, vm.InstanceName)
+}
+
+func (vm *AutoScalerServerNode) generateProviderID() string {
+	return fmt.Sprintf("aws://%s/%s", *vm.runningInstance.Zone, *vm.runningInstance.InstanceID)
 }
 
 func (vm *AutoScalerServerNode) setServerConfiguration(config *types.AutoScalerServerConfig) {

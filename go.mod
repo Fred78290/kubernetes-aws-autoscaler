@@ -1,6 +1,6 @@
 module github.com/Fred78290/kubernetes-aws-autoscaler
 
-go 1.17
+go 1.19
 
 require (
 	github.com/alecthomas/kingpin v2.2.6+incompatible
@@ -13,11 +13,11 @@ require (
 	google.golang.org/grpc v1.42.0
 	google.golang.org/protobuf v1.27.1
 	gopkg.in/yaml.v2 v2.4.0
-	k8s.io/api v0.24.5
-	k8s.io/apiextensions-apiserver v0.24.5
-	k8s.io/apimachinery v0.24.5
-	k8s.io/client-go v0.24.5
-	k8s.io/code-generator v0.24.5
+	k8s.io/api v0.24.6
+	k8s.io/apiextensions-apiserver v0.24.6
+	k8s.io/apimachinery v0.24.6
+	k8s.io/client-go v0.24.6
+	k8s.io/code-generator v0.24.6
 )
 
 require (
