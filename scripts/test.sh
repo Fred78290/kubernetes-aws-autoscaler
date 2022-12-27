@@ -25,6 +25,6 @@ export PRIVATE_DOMAIN_NAME=$PRIVATE_DOMAIN_NAME
 export PUBLIC_DOMAIN_NAME=$PUBLIC_DOMAIN_NAME
 EOF
 
-export | grep GITHUB | sed 's/declare -x/export/g' > ./scripts/local.env
+export | grep GITHUB | sed 's/declare -x/export/g' >> ./scripts/local.env
 
 make -e REGISTRY=fred78290 -e TAG=test-ci test-in-docker
