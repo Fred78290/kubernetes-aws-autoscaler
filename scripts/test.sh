@@ -1,4 +1,9 @@
 #!/bin/bash
+if [ -z "${GITHUB_RUN_ID}" ]; then
+    echo "Can't run out of github action"
+    exit 1
+fi
+
 cat > ./scripts/local.env <<EOF
 export SEED_IMAGE=$SEED_IMAGE
 export IAM_ROLE_ARN=$IAM_ROLE_ARN

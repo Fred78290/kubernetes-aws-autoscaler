@@ -12,7 +12,7 @@ fi
 
 source ${AWSDEFS}
 
-if [ -z $AWS_ACCESSKEY ] && [ -z $AWS_PROFILE ]; then
+if [ -z "${AWS_ACCESSKEY}" ] && [ -z "${AWS_PROFILE}" ]; then
     echo "Neither AWS_ACCESSKEY or AWS_PROFILE are defined, exit test"
     exit 1
 fi
@@ -46,7 +46,7 @@ cat > ./test/test.json <<EOF
     "timeout": 900,
     "ami": "${SEED_IMAGE}",
     "iam-role-arn": "${IAM_ROLE_ARN}",
-    "instanceName": "test-kubernetes-aws-autoscaler",
+    "instanceName": "test-kubernetes-aws-${GITHUB_RUN_ID}",
     "instanceType": "t3a.micro",
     "diskSize": 10,
     "tags": [
@@ -68,7 +68,7 @@ cat > ./test/test.json <<EOF
         ]
     },
     "ssh": {
-        "user": "$SEED_USER",
+        "user": "${SEED_USER}",
         "ssh-private-key": "${HOME}/.ssh/test_rsa"
     }
 }
@@ -92,7 +92,7 @@ cat > ./test/config.json <<EOF
   "controlplane-name-prefix": "master",
   "nodePrice": 0,
   "podPrice": 0,
-  "image": "ami-08ca3fed11864d6bb",
+  "image": "${SEED_IMAGE}",
   "cloud-provider": "external",
   "optionals": {
     "pricing": false,
@@ -110,7 +110,7 @@ cat > ./test/config.json <<EOF
       "--ignore-preflight-errors=All"
     ]
   },
-  "default-machine": "t3a.medium",
+  "default-machine": "t3a.micro",
   "machines": {
     "t3a.nano": {
       "price": 0.0051,
@@ -164,11 +164,11 @@ cat > ./test/config.json <<EOF
   },
   "sync-folder": {},
   "ssh-infos": {
-    "user": "$SEED_USER",
+    "user": "${SEED_USER}",
     "ssh-private-key": "${HOME}/.ssh/test_rsa"
   },
   "aws": {
-    "aws-ca-k8s": {
+    "aws-${GITHUB_RUN_ID}": {
       "profile": "${AWS_PROFILE}",
       "region": "${AWS_REGION}",
       "accessKey": "${AWS_ACCESSKEY}",
@@ -205,29 +205,32 @@ EOF
 go clean -testcache
 go mod vendor
 
-echo "Run create instance"
-go test $VERBOSE --run Test_createInstance -timeout 60s -count 1 -race ./aws
+# Run this test only on github action
+if [ ! -z "${GITHUB_REF}" ]; then
+  echo "Run create instance"
+  go test $VERBOSE --run Test_createInstance -timeout 60s -count 1 -race ./aws
 
-echo "Run get instance"
-go test $VERBOSE --run Test_getInstanceID -timeout 60s -count 1 -race ./aws
+  echo "Run get instance"
+  go test $VERBOSE --run Test_getInstanceID -timeout 60s -count 1 -race ./aws
 
-echo "Run status instance"
-go test $VERBOSE --run Test_statusInstance -timeout 60s -count 1 -race ./aws
+  echo "Run status instance"
+  go test $VERBOSE --run Test_statusInstance -timeout 60s -count 1 -race ./aws
 
-echo "Run wait for started"
-go test $VERBOSE --run Test_waitForPowered -timeout 60s -count 1 -race ./aws
+  echo "Run wait for started"
+  go test $VERBOSE --run Test_waitForPowered -timeout 60s -count 1 -race ./aws
 
-echo "Run wait for IP"
-go test $VERBOSE --run Test_waitForIP -timeout 120s -count 1 -race ./aws
+  echo "Run wait for IP"
+  go test $VERBOSE --run Test_waitForIP -timeout 120s -count 1 -race ./aws
 
-#echo "Run power instance"
-#go test $VERBOSE --run Test_powerOffInstance -count 1 -race ./aws
+  #echo "Run power instance"
+  #go test $VERBOSE --run Test_powerOffInstance -count 1 -race ./aws
 
-echo "Run shutdown instance"
-go test $VERBOSE --run Test_shutdownInstance -timeout 600s -count 1 -race ./aws
+  echo "Run shutdown instance"
+  go test $VERBOSE --run Test_shutdownInstance -timeout 600s -count 1 -race ./aws
 
-echo "Run test delete instance"
-go test $VERBOSE --run Test_deleteInstance -timeout 60s -count 1 -race ./aws
+  echo "Run test delete instance"
+  go test $VERBOSE --run Test_deleteInstance -timeout 60s -count 1 -race ./aws
+fi
 
 export TEST_CONFIG=../test/config.json
 
