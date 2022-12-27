@@ -2,7 +2,9 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/Fred78290/kubernetes-aws-autoscaler/aws"
@@ -33,7 +35,7 @@ type autoScalerServerNodeGroupTest struct {
 }
 
 func (ng *autoScalerServerNodeGroupTest) createTestNode(name ...string) *AutoScalerServerNode {
-	nodeName := testNodeName
+	nodeName := ng.getTestNodeName()
 
 	if len(name) > 0 {
 		nodeName = name[0]
@@ -43,7 +45,7 @@ func (ng *autoScalerServerNodeGroupTest) createTestNode(name ...string) *AutoSca
 		runningInstance, state := findEc2Instance(ng.testConfig, nodeName)
 
 		node := &AutoScalerServerNode{
-			NodeGroupID:     testGroupID,
+			NodeGroupID:     ng.getNodeGroupID(),
 			InstanceName:    nodeName,
 			NodeName:        nodeName,
 			InstanceType:    ng.InstanceType,
@@ -69,7 +71,7 @@ func (ng *autoScalerServerNodeGroupTest) createTestNode(name ...string) *AutoSca
 }
 
 func (m *nodegroupTest) launchVM() {
-	ng, testNode, err := m.newTestNode(launchVMName)
+	ng, testNode, err := m.newTestNode(m.getLaunchedVMName())
 
 	if assert.NoError(m.t, err) {
 		if err := testNode.launchVM(m, ng.NodeLabels, ng.SystemLabels); err != nil {
@@ -79,7 +81,7 @@ func (m *nodegroupTest) launchVM() {
 }
 
 func (m *nodegroupTest) startVM() {
-	_, testNode, err := m.newTestNode(launchVMName)
+	_, testNode, err := m.newTestNode(m.getLaunchedVMName())
 
 	if assert.NoError(m.t, err) {
 		if err := testNode.startVM(m); err != nil {
@@ -89,7 +91,7 @@ func (m *nodegroupTest) startVM() {
 }
 
 func (m *nodegroupTest) stopVM() {
-	_, testNode, err := m.newTestNode(launchVMName)
+	_, testNode, err := m.newTestNode(m.getLaunchedVMName())
 
 	if assert.NoError(m.t, err) {
 		if err := testNode.stopVM(m); err != nil {
@@ -99,7 +101,7 @@ func (m *nodegroupTest) stopVM() {
 }
 
 func (m *nodegroupTest) deleteVM() {
-	_, testNode, err := m.newTestNode(launchVMName)
+	_, testNode, err := m.newTestNode(m.getLaunchedVMName())
 
 	if assert.NoError(m.t, err) {
 		if err := testNode.deleteVM(m); err != nil {
@@ -109,7 +111,7 @@ func (m *nodegroupTest) deleteVM() {
 }
 
 func (m *nodegroupTest) statusVM() {
-	_, testNode, err := m.newTestNode(launchVMName)
+	_, testNode, err := m.newTestNode(m.getLaunchedVMName())
 
 	if assert.NoError(m.t, err) {
 		if got, err := testNode.statusVM(); err != nil {
@@ -131,7 +133,7 @@ func (m *nodegroupTest) addNode() {
 }
 
 func (m *nodegroupTest) deleteNode() {
-	ng, testNode, err := m.newTestNode(launchVMName)
+	ng, testNode, err := m.newTestNode(m.getLaunchedVMName())
 
 	if assert.NoError(m.t, err) {
 		if err := ng.deleteNodeByName(m, testNode.NodeName); err != nil {
@@ -148,6 +150,36 @@ func (m *nodegroupTest) deleteNodeGroup() {
 			m.t.Errorf("AutoScalerServerNodeGroup.deleteNodeGroup() error = %v", err)
 		}
 	}
+}
+
+func (m *baseTest) getNodeGroupID() string {
+	var GITHUB_RUN_ID string
+
+	if GITHUB_RUN_ID = os.Getenv("GITHUB_RUN_ID"); len(GITHUB_RUN_ID) == 0 {
+		GITHUB_RUN_ID = defaultJobID
+	}
+
+	return fmt.Sprintf(templateTestGroupID, GITHUB_RUN_ID)
+}
+
+func (m *baseTest) getTestNodeName() string {
+	var GITHUB_RUN_ID string
+
+	if GITHUB_RUN_ID = os.Getenv("GITHUB_RUN_ID"); len(GITHUB_RUN_ID) == 0 {
+		GITHUB_RUN_ID = defaultJobID
+	}
+
+	return fmt.Sprintf(templateTestNodeName, GITHUB_RUN_ID)
+}
+
+func (m *baseTest) getLaunchedVMName() string {
+	var GITHUB_RUN_ID string
+
+	if GITHUB_RUN_ID = os.Getenv("GITHUB_RUN_ID"); len(GITHUB_RUN_ID) == 0 {
+		GITHUB_RUN_ID = defaultJobID
+	}
+
+	return fmt.Sprintf(templateLaunchVMName, GITHUB_RUN_ID)
 }
 
 func (m *baseTest) KubeClient() (kubernetes.Interface, error) {
@@ -169,10 +201,10 @@ func (m *baseTest) PodList(nodeName string, podFilter types.PodFilterFunc) ([]ap
 func (m *baseTest) NodeList() (*apiv1.NodeList, error) {
 	node := apiv1.Node{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: testNodeName,
+			Name: m.getTestNodeName(),
 			UID:  testCRDUID,
 			Annotations: map[string]string{
-				constantes.AnnotationNodeGroupName:        testGroupID,
+				constantes.AnnotationNodeGroupName:        m.getNodeGroupID(),
 				constantes.AnnotationNodeIndex:            "0",
 				constantes.AnnotationInstanceID:           testInstanceID,
 				constantes.AnnotationNodeAutoProvisionned: "true",
@@ -215,7 +247,7 @@ func (m *baseTest) GetNode(nodeName string) (*apiv1.Node, error) {
 			Name: nodeName,
 			UID:  testCRDUID,
 			Annotations: map[string]string{
-				constantes.AnnotationNodeGroupName:        testGroupID,
+				constantes.AnnotationNodeGroupName:        m.getNodeGroupID(),
 				constantes.AnnotationNodeIndex:            "0",
 				constantes.AnnotationInstanceID:           findInstanceID(m.testConfig, nodeName),
 				constantes.AnnotationNodeAutoProvisionned: "true",
@@ -270,7 +302,7 @@ func (m *baseTest) newTestNodeGroup() (*autoScalerServerNodeGroupTest, error) {
 			AutoScalerServerNodeGroup: AutoScalerServerNodeGroup{
 				AutoProvision:              true,
 				ServiceIdentifier:          config.ServiceIdentifier,
-				NodeGroupIdentifier:        testGroupID,
+				NodeGroupIdentifier:        m.getNodeGroupID(),
 				ProvisionnedNodeNamePrefix: config.ProvisionnedNodeNamePrefix,
 				ManagedNodeNamePrefix:      config.ManagedNodeNamePrefix,
 				ControlPlaneNamePrefix:     config.ControlPlaneNamePrefix,
@@ -308,7 +340,7 @@ func (m *baseTest) newTestConfig() (*types.AutoScalerServerConfig, error) {
 		return nil, err
 	} else {
 		if err = json.Unmarshal(configStr, &config); err == nil {
-			m.testConfig = config.GetAwsConfiguration(testGroupID)
+			m.testConfig = config.GetAwsConfiguration(m.getNodeGroupID())
 			m.testConfig.TestMode = true
 			config.SSH.TestMode = true
 		}
@@ -332,7 +364,7 @@ func findEc2Instance(awsConfig *aws.Configuration, nodeName string) (*aws.Ec2Ins
 	var runningInstance *aws.Ec2Instance
 	var err error
 
-	if nodeName != testNodeName {
+	if strings.HasSuffix(nodeName, "vm-test") == false {
 		if runningInstance, err = aws.GetEc2Instance(awsConfig, nodeName); err == nil {
 			if status, err := runningInstance.Status(); err == nil {
 				if status.Powered {
