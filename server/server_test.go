@@ -102,6 +102,25 @@ func (m *serverTest) NodeGroupForNode() {
 	}
 }
 
+func (m *serverTest) HasInstance() {
+	s, err := m.newTestServerWithState(true, true, AutoScalerServerNodeStateRunning)
+
+	if assert.NoError(m.t, err) {
+		request := &apigrpc.HasInstanceRequest{
+			ProviderID: s.configuration.ServiceIdentifier,
+			Node:       utils.ToJSON(s.createFakeNode()),
+		}
+
+		if got, err := s.HasInstance(context.TODO(), request); err != nil {
+			m.t.Errorf("AutoScalerServerApp.HasInstance() error = %v", err)
+		} else if got.GetError() != nil {
+			m.t.Errorf("AutoScalerServerApp.HasInstance() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+		} else if got.GetHasInstance() == false {
+			m.t.Error("AutoScalerServerApp.HasInstance() not found")
+		}
+	}
+}
+
 func (m *serverTest) Pricing() {
 	s, err := m.newTestServer(true, false)
 
@@ -605,7 +624,7 @@ func (m *serverTest) extractAvailableMachineTypes(availableMachineTypes *apigrpc
 	return r
 }
 
-func (m *serverTest) newTestServer(addNodeGroup, addTestNode bool, nodeName ...string) (*autoScalerServerAppTest, error) {
+func (m *serverTest) newTestServerWithState(addNodeGroup, addTestNode bool, desiredState AutoScalerServerNodeState, nodeName ...string) (*autoScalerServerAppTest, error) {
 
 	if ng, err := m.newTestNodeGroup(); err == nil {
 		s := &autoScalerServerAppTest{
@@ -625,7 +644,7 @@ func (m *serverTest) newTestServer(addNodeGroup, addTestNode bool, nodeName ...s
 			s.Groups[ng.NodeGroupIdentifier] = &ng.AutoScalerServerNodeGroup
 
 			if addTestNode {
-				ng.createTestNode(nodeName...)
+				ng.createTestNodeWithState(desiredState, nodeName...)
 			}
 		}
 
@@ -633,6 +652,10 @@ func (m *serverTest) newTestServer(addNodeGroup, addTestNode bool, nodeName ...s
 	} else {
 		return nil, err
 	}
+}
+
+func (m *serverTest) newTestServer(addNodeGroup, addTestNode bool, nodeName ...string) (*autoScalerServerAppTest, error) {
+	return m.newTestServerWithState(addNodeGroup, addTestNode, AutoScalerServerNodeStateRunning, nodeName...)
 }
 
 func createServerTest(t *testing.T) *serverTest {
