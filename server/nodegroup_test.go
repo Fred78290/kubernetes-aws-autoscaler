@@ -34,7 +34,7 @@ type autoScalerServerNodeGroupTest struct {
 	baseTest
 }
 
-func (ng *autoScalerServerNodeGroupTest) createTestNode(name ...string) *AutoScalerServerNode {
+func (ng *autoScalerServerNodeGroupTest) createTestNodeWithState(desiredState AutoScalerServerNodeState, name ...string) *AutoScalerServerNode {
 	nodeName := ng.getTestNodeName()
 
 	if len(name) > 0 {
@@ -42,7 +42,7 @@ func (ng *autoScalerServerNodeGroupTest) createTestNode(name ...string) *AutoSca
 	}
 
 	if machine, ok := ng.configuration.Machines[ng.InstanceType]; ok {
-		runningInstance, state := findEc2Instance(ng.testConfig, nodeName)
+		runningInstance, state := findEc2Instance(ng.testConfig, nodeName, desiredState)
 
 		node := &AutoScalerServerNode{
 			NodeGroupID:     ng.getNodeGroupID(),
@@ -68,6 +68,10 @@ func (ng *autoScalerServerNodeGroupTest) createTestNode(name ...string) *AutoSca
 	ng.t.Fatalf("Unable to find machine definition for type: %s", ng.InstanceType)
 
 	return nil
+}
+
+func (ng *autoScalerServerNodeGroupTest) createTestNode(name ...string) *AutoScalerServerNode {
+	return ng.createTestNodeWithState(AutoScalerServerNodeStateNotCreated, name...)
 }
 
 func (m *nodegroupTest) launchVM() {
@@ -359,8 +363,7 @@ func (m *baseTest) ssh() {
 	}
 }
 
-func findEc2Instance(awsConfig *aws.Configuration, nodeName string) (*aws.Ec2Instance, AutoScalerServerNodeState) {
-	var state AutoScalerServerNodeState = AutoScalerServerNodeStateNotCreated
+func findEc2Instance(awsConfig *aws.Configuration, nodeName string, desiredState AutoScalerServerNodeState) (*aws.Ec2Instance, AutoScalerServerNodeState) {
 	var runningInstance *aws.Ec2Instance
 	var err error
 
@@ -368,7 +371,7 @@ func findEc2Instance(awsConfig *aws.Configuration, nodeName string) (*aws.Ec2Ins
 		if runningInstance, err = aws.GetEc2Instance(awsConfig, nodeName); err == nil {
 			if status, err := runningInstance.Status(); err == nil {
 				if status.Powered {
-					state = AutoScalerServerNodeStateRunning
+					desiredState = AutoScalerServerNodeStateRunning
 				}
 			}
 		} else {
@@ -385,11 +388,11 @@ func findEc2Instance(awsConfig *aws.Configuration, nodeName string) (*aws.Ec2Ins
 		runningInstance.AddressIP = awssdk.String("127.0.0.1")
 	}
 
-	return runningInstance, state
+	return runningInstance, desiredState
 }
 
 func findInstanceID(awsConfig *aws.Configuration, nodeName string) string {
-	instance, _ := findEc2Instance(awsConfig, nodeName)
+	instance, _ := findEc2Instance(awsConfig, nodeName, AutoScalerServerNodeStateNotCreated)
 
 	return *instance.InstanceID
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/Fred78290/kubernetes-aws-autoscaler/client"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/server"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/types"
+
 	glog "github.com/sirupsen/logrus"
 )
 
