@@ -76,12 +76,6 @@ func Test_Server(t *testing.T) {
 			})
 		}
 
-		if utils.ShouldTestFeature("TestServer_HasInstance") {
-			t.Run("TestServer_HasInstance", func(t *testing.T) {
-				test.HasInstance()
-			})
-		}
-
 		if utils.ShouldTestFeature("TestServer_Pricing") {
 			t.Run("TestServer_Pricing", func(t *testing.T) {
 				test.Pricing()
@@ -121,6 +115,12 @@ func Test_Server(t *testing.T) {
 		if utils.ShouldTestFeature("TestServer_IncreaseSize") {
 			t.Run("TestServer_IncreaseSize", func(t *testing.T) {
 				test.IncreaseSize()
+			})
+		}
+
+		if utils.ShouldTestFeature("TestServer_HasInstance") {
+			t.Run("TestServer_HasInstance", func(t *testing.T) {
+				test.HasInstance()
 			})
 		}
 

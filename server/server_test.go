@@ -103,12 +103,13 @@ func (m *serverTest) NodeGroupForNode() {
 }
 
 func (m *serverTest) HasInstance() {
-	s, err := m.newTestServerWithState(true, true, AutoScalerServerNodeStateRunning)
+	nodeName := m.getLaunchedVMName()
+	s, err := m.newTestServerWithState(true, true, AutoScalerServerNodeStateRunning, nodeName)
 
 	if assert.NoError(m.t, err) {
 		request := &apigrpc.HasInstanceRequest{
 			ProviderID: s.configuration.ServiceIdentifier,
-			Node:       utils.ToJSON(s.createFakeNode()),
+			Node:       utils.ToJSON(s.createFakeNode(nodeName)),
 		}
 
 		if got, err := s.HasInstance(context.TODO(), request); err != nil {
