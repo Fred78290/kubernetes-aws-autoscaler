@@ -304,7 +304,7 @@ func (instance *Ec2Instance) WaitForPowered() error {
 	return fmt.Errorf(constantes.ErrWaitIPTimeout, instance.InstanceName, instance.config.Timeout.String())
 }
 
-func (instance *Ec2Instance) buildNetworkInterfaces(desiredENI *UserDefinedNetworkInterface) ([]*ec2.InstanceNetworkInterfaceSpecification, error) {
+func (instance *Ec2Instance) buildNetworkInterfaces(nodeIndex int, desiredENI *UserDefinedNetworkInterface) ([]*ec2.InstanceNetworkInterfaceSpecification, error) {
 	var err error
 
 	if desiredENI != nil {
@@ -347,7 +347,7 @@ func (instance *Ec2Instance) buildNetworkInterfaces(desiredENI *UserDefinedNetwo
 			if len(desiredENI.SubnetID) > 0 {
 				subnetID = aws.String(desiredENI.SubnetID)
 			} else {
-				subnetID = aws.String(instance.config.Network.ENI[0].GetRandomSubnetsID())
+				subnetID = aws.String(instance.config.Network.ENI[0].GetNextSubnetsID(nodeIndex))
 			}
 
 			if len(desiredENI.SecurityGroupID) > 0 {
@@ -381,7 +381,7 @@ func (instance *Ec2Instance) buildNetworkInterfaces(desiredENI *UserDefinedNetwo
 				DeleteOnTermination:      aws.Bool(true),
 				Description:              aws.String(instance.InstanceName),
 				DeviceIndex:              aws.Int64(int64(index)),
-				SubnetId:                 aws.String(eni.GetRandomSubnetsID()),
+				SubnetId:                 aws.String(eni.GetNextSubnetsID(nodeIndex)),
 				Groups: []*string{
 					aws.String(eni.SecurityGroupID),
 				},
@@ -501,7 +501,7 @@ func (instance *Ec2Instance) Create(nodeIndex int, nodeGroup, instanceType strin
 	}
 
 	// Add ENI
-	if input.NetworkInterfaces, err = instance.buildNetworkInterfaces(desiredENI); err != nil {
+	if input.NetworkInterfaces, err = instance.buildNetworkInterfaces(nodeIndex, desiredENI); err != nil {
 		return err
 	}
 

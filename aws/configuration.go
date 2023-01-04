@@ -3,7 +3,6 @@ package aws
 import (
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"strings"
 	"time"
 
@@ -88,12 +87,6 @@ type CallbackCheckIPReady interface {
 	CheckIfIPIsReady(name, address string) error
 }
 
-func randomNumberInRange(min, max int) int {
-	rand.Seed(time.Now().UnixNano())
-
-	return rand.Intn(max-min) + min
-}
-
 func isNullOrEmpty(s string) bool {
 	return len(strings.TrimSpace(s)) == 0
 }
@@ -123,14 +116,14 @@ func Copy(dst interface{}, src interface{}) error {
 	return nil
 }
 
-func (eni *NetworkInterface) GetRandomSubnetsID() string {
+func (eni *NetworkInterface) GetNextSubnetsID(nodeIndex int) string {
 	numOfEnis := len(eni.SubnetsID)
 
 	if numOfEnis == 1 {
 		return eni.SubnetsID[0]
 	}
 
-	index := randomNumberInRange(0, numOfEnis-1)
+	index := nodeIndex % numOfEnis
 
 	return eni.SubnetsID[index]
 }
