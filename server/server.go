@@ -42,6 +42,9 @@ var availableGPUTypes = map[string]string{
 
 // AutoScalerServerApp declare AutoScaler grpc server
 type AutoScalerServerApp struct {
+	apigrpc.UnimplementedCloudProviderServiceServer
+	apigrpc.UnimplementedNodeGroupServiceServer
+	apigrpc.UnimplementedPricingModelServiceServer
 	ResourceLimiter *types.ResourceLimiter                `json:"limits"`
 	Groups          map[string]*AutoScalerServerNodeGroup `json:"groups"`
 	NodesDefinition []*apigrpc.NodeGroupDef               `json:"nodedefs"`
@@ -1127,6 +1130,78 @@ func (s *AutoScalerServerApp) TemplateNodeInfo(ctx context.Context, request *api
 		Response: &apigrpc.TemplateNodeInfoReply_NodeInfo{NodeInfo: &apigrpc.NodeInfo{
 			Node: utils.ToJSON(node),
 		}},
+	}, nil
+}
+
+func (s *AutoScalerServerApp) GetOptions(ctx context.Context, request *apigrpc.GetOptionsRequest) (*apigrpc.GetOptionsReply, error) {
+	glog.Debugf("Call server GetOptions: %v", request)
+
+	if s.isCallDenied(request) {
+		glog.Errorf(constantes.ErrMismatchingProvider)
+		return nil, fmt.Errorf(constantes.ErrMismatchingProvider)
+	}
+
+	pbDefaults := request.GetDefaults()
+
+	if pbDefaults == nil {
+		return &apigrpc.GetOptionsReply{
+			Response: &apigrpc.GetOptionsReply_Error{
+				Error: &apigrpc.Error{
+					Code:   constantes.CloudProviderError,
+					Reason: "request fields were nil",
+				},
+			},
+		}, nil
+	}
+
+	nodeGroup := s.Groups[request.GetNodeGroupID()]
+
+	if nodeGroup == nil {
+		glog.Errorf(constantes.ErrNodeGroupNotFound, request.GetNodeGroupID())
+
+		return &apigrpc.GetOptionsReply{
+			Response: &apigrpc.GetOptionsReply_Error{
+				Error: &apigrpc.Error{
+					Code:   constantes.CloudProviderError,
+					Reason: fmt.Sprintf(constantes.ErrNodeGroupNotFound, request.GetNodeGroupID()),
+				},
+			},
+		}, nil
+	}
+
+	defaults := &types.NodeGroupAutoscalingOptions{
+		ScaleDownUtilizationThreshold:    pbDefaults.GetScaleDownGpuUtilizationThreshold(),
+		ScaleDownGpuUtilizationThreshold: pbDefaults.GetScaleDownGpuUtilizationThreshold(),
+		ScaleDownUnneededTime:            pbDefaults.GetScaleDownUnneededTime().Duration,
+		ScaleDownUnreadyTime:             pbDefaults.GetScaleDownUnneededTime().Duration,
+	}
+
+	opts, err := nodeGroup.GetOptions(defaults)
+
+	if err != nil {
+		return &apigrpc.GetOptionsReply{
+			Response: &apigrpc.GetOptionsReply_Error{
+				Error: &apigrpc.Error{
+					Code:   constantes.CloudProviderError,
+					Reason: err.Error(),
+				},
+			},
+		}, nil
+	}
+
+	return &apigrpc.GetOptionsReply{
+		Response: &apigrpc.GetOptionsReply_NodeGroupAutoscalingOptions{
+			NodeGroupAutoscalingOptions: &apigrpc.AutoscalingOptions{
+				ScaleDownUtilizationThreshold:    opts.ScaleDownUtilizationThreshold,
+				ScaleDownGpuUtilizationThreshold: opts.ScaleDownGpuUtilizationThreshold,
+				ScaleDownUnneededTime: &metav1.Duration{
+					Duration: opts.ScaleDownUnneededTime,
+				},
+				ScaleDownUnreadyTime: &metav1.Duration{
+					Duration: opts.ScaleDownUnreadyTime,
+				},
+			},
+		},
 	}, nil
 }
 

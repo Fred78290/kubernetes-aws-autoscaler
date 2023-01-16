@@ -207,6 +207,7 @@ type AutoScalerServerConfig struct {
 	Optionals                  *AutoScalerServerOptionals        `json:"optionals"`
 	ManagedNodeResourceLimiter *ResourceLimiter                  `json:"managednodes-limits"`
 	SSH                        *AutoScalerServerSSH              `json:"ssh-infos"`
+	AutoScalingOptions         *NodeGroupAutoscalingOptions      `json:"autoscaling-options,omitempty"`
 	CloudProvider              string                            `json:"cloud-provider"`
 	AwsInfos                   map[string]*aws.Configuration     `json:"aws"`
 }
