@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Fred78290/kubernetes-aws-autoscaler/externalgrpc"
 	apigrpc "github.com/Fred78290/kubernetes-aws-autoscaler/grpc"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/pkg/signals"
 
@@ -17,8 +20,10 @@ import (
 	"github.com/Fred78290/kubernetes-aws-autoscaler/utils"
 	glog "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/reflection"
 	apiv1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type cloudProviderRequest interface {
@@ -91,6 +96,8 @@ func (s *AutoScalerServerApp) newNodeGroup(nodeGroupID string, minNodeSize, maxN
 
 		return nil, fmt.Errorf(constantes.ErrNodeGroupAlreadyExists, nodeGroupID)
 	}
+
+	labels = utils.MergeKubernetesLabel(s.configuration.NodeLabels, labels)
 
 	glog.Infof("New node group, ID:%s minSize:%d, maxSize:%d, machineType:%s, node labels:%v, %v", nodeGroupID, minNodeSize, maxNodeSize, machineType, labels, systemLabels)
 
@@ -343,7 +350,7 @@ func (s *AutoScalerServerApp) NodeGroupForNode(ctx context.Context, request *api
 		}
 
 		if nodeGroup == nil {
-			glog.Infof("Nodegroup not found for node:%s", node.Name)
+			glog.Errorf("Nodegroup not found for node:%s", node.Name)
 
 			return &apigrpc.NodeGroupForNodeReply{
 				Response: &apigrpc.NodeGroupForNodeReply_NodeGroup{
@@ -360,14 +367,13 @@ func (s *AutoScalerServerApp) NodeGroupForNode(ctx context.Context, request *api
 			},
 		}, nil
 	} else {
-		glog.Infof("Node annotation[%s] is empty", constantes.AnnotationNodeGroupName)
-
 		return &apigrpc.NodeGroupForNodeReply{
 			Response: &apigrpc.NodeGroupForNodeReply_NodeGroup{
 				NodeGroup: &apigrpc.NodeGroup{},
 			},
 		}, nil
 	}
+
 }
 
 func (s *AutoScalerServerApp) HasInstance(ctx context.Context, request *apigrpc.HasInstanceRequest) (*apigrpc.HasInstanceReply, error) {
@@ -441,8 +447,6 @@ func (s *AutoScalerServerApp) HasInstance(ctx context.Context, request *apigrpc.
 		}, nil
 
 	} else {
-		glog.Infof("Node annotation[%s] is empty", constantes.AnnotationNodeGroupName)
-
 		return &apigrpc.HasInstanceReply{
 			Response: &apigrpc.HasInstanceReply_Error{
 				Error: &apigrpc.Error{
@@ -815,7 +819,7 @@ func (s *AutoScalerServerApp) IncreaseSize(ctx context.Context, request *apigrpc
 		}, nil
 	}
 
-	newSize := len(nodeGroup.Nodes) + int(request.GetDelta())
+	newSize := nodeGroup.targetSize() + int(request.GetDelta())
 
 	if newSize > nodeGroup.MaxNodeSize {
 		glog.Errorf(constantes.ErrIncreaseSizeTooLarge, newSize, nodeGroup.MaxNodeSize)
@@ -1066,9 +1070,9 @@ func (s *AutoScalerServerApp) Nodes(ctx context.Context, request *apigrpc.NodeGr
 		}, nil
 	}
 
-	instances := make([]*apigrpc.Instance, 0, len(nodeGroup.Nodes))
+	instances := make([]*apigrpc.Instance, 0, nodeGroup.targetSize())
 
-	for _, node := range nodeGroup.Nodes {
+	for _, node := range nodeGroup.AllNodes() {
 		instances = append(instances, &apigrpc.Instance{
 			Id: node.generateProviderID(),
 			Status: &apigrpc.InstanceStatus{
@@ -1120,7 +1124,19 @@ func (s *AutoScalerServerApp) TemplateNodeInfo(ctx context.Context, request *api
 		}, nil
 	}
 
+	labels := utils.MergeKubernetesLabel(nodeGroup.NodeLabels, nodeGroup.SystemLabels)
+	annotations := types.KubernetesLabel{
+		constantes.AnnotationNodeGroupName:        request.GetNodeGroupID(),
+		constantes.AnnotationScaleDownDisabled:    "false",
+		constantes.AnnotationNodeAutoProvisionned: "true",
+		constantes.AnnotationNodeManaged:          "false",
+	}
+
 	node := &apiv1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels:      labels,
+			Annotations: annotations,
+		},
 		Spec: apiv1.NodeSpec{
 			Unschedulable: false,
 		},
@@ -1354,7 +1370,7 @@ func (s *AutoScalerServerApp) Belongs(ctx context.Context, request *apigrpc.Belo
 
 		return &apigrpc.BelongsReply{
 			Response: &apigrpc.BelongsReply_Belongs{
-				Belongs: nodeGroup.Nodes[node.Name] != nil,
+				Belongs: nodeGroup.findNamedNode(node.Name) != nil,
 			},
 		}, nil
 	}
@@ -1500,31 +1516,71 @@ func (s *AutoScalerServerApp) startController() error {
 	return err
 }
 
-func (s *AutoScalerServerApp) run(config *types.AutoScalerServerConfig) {
-	lis, err := net.Listen(config.Network, config.Listen)
+func (s *AutoScalerServerApp) runServer(config *types.AutoScalerServerConfig, registerService func(*grpc.Server)) error {
+	var server *grpc.Server
 
-	if err != nil {
-		glog.Fatalf("failed to listen: %v", err)
+	if config.CertCA == "" || config.CertPrivateKey == "" || config.CertPublicKey == "" {
+		server = grpc.NewServer()
+	} else {
+		certPool := x509.NewCertPool()
+
+		if certificate, err := tls.LoadX509KeyPair(config.CertPublicKey, config.CertPrivateKey); err != nil {
+			return fmt.Errorf("failed to read certificate files: %s", err)
+		} else if bs, err := os.ReadFile(config.CertCA); err != nil {
+			return fmt.Errorf("failed to read client ca cert: %s", err)
+		} else if ok := certPool.AppendCertsFromPEM(bs); !ok {
+			return fmt.Errorf("failed to append client certs")
+		} else {
+
+			transportCreds := credentials.NewTLS(&tls.Config{
+				ClientAuth:   tls.RequireAndVerifyClientCert,
+				Certificates: []tls.Certificate{certificate},
+				ClientCAs:    certPool,
+			})
+
+			server = grpc.NewServer(grpc.Creds(transportCreds))
+		}
 	}
-
-	server := grpc.NewServer()
 
 	defer func() {
 		s.running = false
 		server.Stop()
 	}()
 
-	apigrpc.RegisterCloudProviderServiceServer(server, s)
-	apigrpc.RegisterNodeGroupServiceServer(server, s)
-	apigrpc.RegisterPricingModelServiceServer(server, s)
-
+	registerService(server)
 	reflection.Register(server)
 
-	if err := server.Serve(lis); err != nil {
-		log.Fatalf("failed to serve: %v", err)
+	if listener, err := net.Listen(config.Network, config.Listen); err != nil {
+		return fmt.Errorf("failed to listen: %v", err)
+	} else if err = server.Serve(listener); err != nil {
+		return fmt.Errorf("failed to serve: %v", err)
 	}
 
 	glog.Infof("End listening server")
+
+	return nil
+}
+
+func (s *AutoScalerServerApp) runVanillaGrpc(config *types.AutoScalerServerConfig) {
+	if err := s.runServer(config, func(server *grpc.Server) {
+		if external, err := NewExternalgrpcServerApp(s); err != nil {
+			glog.Fatalf("failed to create externalgrpc: %v", err)
+		} else {
+			externalgrpc.RegisterCloudProviderServer(server, external)
+		}
+	}); err != nil {
+		glog.Fatalf("failed to start server: %v", err)
+	}
+}
+
+func (s *AutoScalerServerApp) run(config *types.AutoScalerServerConfig) {
+	if err := s.runServer(config, func(server *grpc.Server) {
+		apigrpc.RegisterCloudProviderServiceServer(server, s)
+		apigrpc.RegisterNodeGroupServiceServer(server, s)
+		apigrpc.RegisterPricingModelServiceServer(server, s)
+	}); err != nil {
+		glog.Fatalf("failed to start server: %v", err)
+	}
 }
 
 // StartServer start the service
@@ -1568,6 +1624,10 @@ func StartServer(kubeClient types.ClientGenerator, c *types.Config) {
 
 	if config.UseExternalEtdc == nil {
 		config.UseExternalEtdc = &c.UseExternalEtdc
+	}
+
+	if config.UseVanillaGrpcProvider == nil {
+		config.UseVanillaGrpcProvider = &c.UseVanillaGrpcProvider
 	}
 
 	if len(config.ExtDestinationEtcdSslDir) == 0 {
@@ -1621,5 +1681,9 @@ func StartServer(kubeClient types.ClientGenerator, c *types.Config) {
 		glog.Fatalf("Can't start controller, reason:%s", err)
 	}
 
-	autoScalerServer.run(&config)
+	if *config.UseVanillaGrpcProvider {
+		autoScalerServer.runVanillaGrpc(&config)
+	} else {
+		autoScalerServer.run(&config)
+	}
 }
