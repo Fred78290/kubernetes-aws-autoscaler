@@ -93,6 +93,12 @@ func (s AutoScalerServerNodeState) String() string {
 	return autoScalerServerNodeStateString[s]
 }
 
+func (vm *AutoScalerServerNode) waitReady(c types.ClientGenerator) error {
+	glog.Debugf("AutoScalerNode::waitReady, node:%s", vm.NodeName)
+
+	return c.WaitNodeToBeReady(vm.NodeName)
+}
+
 func (vm *AutoScalerServerNode) recopyEtcdSslFilesIfNeeded() error {
 	var err error
 
@@ -383,7 +389,7 @@ func (vm *AutoScalerServerNode) launchVM(c types.ClientGenerator, nodeLabels, sy
 
 		err = fmt.Errorf(constantes.ErrProviderIDNotConfigured, vm.NodeName, err)
 
-	} else if err = c.WaitNodeToBeReady(vm.NodeName, int(aws.Timeout)); err != nil {
+	} else if err = vm.waitReady(c); err != nil {
 
 		err = fmt.Errorf(constantes.ErrNodeIsNotReady, vm.InstanceName)
 

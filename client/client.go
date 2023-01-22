@@ -42,6 +42,7 @@ type SingletonClientGenerator struct {
 	RequestTimeout       time.Duration
 	DeletionTimeout      time.Duration
 	MaxGracePeriod       time.Duration
+	NodeReadyTimeout     time.Duration
 	kubeClient           kubernetes.Interface
 	nodeManagerClientset managednodeClientset.Interface
 	apiExtensionClient   apiextensionClientset.Interface
@@ -155,7 +156,7 @@ func (p *SingletonClientGenerator) ApiExtentionClient() (apiextensionClientset.I
 	return p.apiExtensionClient, err
 }
 
-func (p *SingletonClientGenerator) WaitNodeToBeReady(nodeName string, timeToWaitInSeconds int) error {
+func (p *SingletonClientGenerator) WaitNodeToBeReady(nodeName string) error {
 	var nodeInfo *apiv1.Node
 	kubeclient, err := p.KubeClient()
 
@@ -658,10 +659,11 @@ func (p *SingletonClientGenerator) TaintNode(nodeName string, taints ...apiv1.Ta
 
 func NewClientGenerator(cfg *types.Config) types.ClientGenerator {
 	return &SingletonClientGenerator{
-		KubeConfig:      cfg.KubeConfig,
-		APIServerURL:    cfg.APIServerURL,
-		RequestTimeout:  cfg.RequestTimeout,
-		DeletionTimeout: cfg.DeletionTimeout,
-		MaxGracePeriod:  cfg.MaxGracePeriod,
+		KubeConfig:       cfg.KubeConfig,
+		APIServerURL:     cfg.APIServerURL,
+		RequestTimeout:   cfg.RequestTimeout,
+		NodeReadyTimeout: cfg.NodeReadyTimeout,
+		DeletionTimeout:  cfg.DeletionTimeout,
+		MaxGracePeriod:   cfg.MaxGracePeriod,
 	}
 }
