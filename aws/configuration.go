@@ -203,3 +203,11 @@ func (conf *Configuration) Create(nodeIndex int, nodeGroup, name, instanceType s
 
 	return instance, nil
 }
+
+func (conf *Configuration) Exists(name string) bool {
+	if _, err := GetEc2Instance(conf, name); err == nil {
+		return true
+	}
+
+	return false
+}
