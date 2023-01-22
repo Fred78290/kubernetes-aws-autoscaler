@@ -61,9 +61,11 @@ func Test_AuthMethodKey(t *testing.T) {
 	if utils.ShouldTestFeature("Test_AuthMethodKey") {
 		config := loadFromJson(getConfFile())
 
-		signer := utils.AuthMethodFromPrivateKeyFile(config.SSH.GetAuthKeys())
+		_, err := utils.AuthMethodFromPrivateKeyFile(config.SSH.GetAuthKeys())
 
-		assert.NotNil(t, signer)
+		if assert.NoError(t, err) {
+			t.Log("OK")
+		}
 	}
 }
 
