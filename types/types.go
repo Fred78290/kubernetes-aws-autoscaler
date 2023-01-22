@@ -361,7 +361,7 @@ func NewConfig() *Config {
 		MaxMemory:                1024 * 24,
 		ManagedNodeMinDiskSize:   ManagedNodeMinDiskSize,
 		ManagedNodeMaxDiskSize:   ManagedNodeMaxDiskSize,
-		ManagedNodeDiskType:      "gp2",
+		ManagedNodeDiskType:      "gp3",
 		LogFormat:                "text",
 		LogLevel:                 glog.InfoLevel.String(),
 	}
