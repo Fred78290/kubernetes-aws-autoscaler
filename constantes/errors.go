@@ -88,6 +88,9 @@ const (
 	// ErrVMAlreadyCreated error msg
 	ErrVMAlreadyCreated = "unable to launch VM, %s is already created"
 
+	// ErrVMAlreadyExists error msg
+	ErrVMAlreadyExists = "the vm named: %s is already exists"
+
 	// ErrUnableToMountPath error msg
 	ErrUnableToMountPath = "unable to mount host path:%s into guest:%s for node:%s, reason: %v"
 
@@ -206,7 +209,7 @@ const (
 	ErrWrongStateMachine = "unexpected instance state %s for instance %s, expected prending or running"
 
 	// ErrWaitIPTimeout error msg
-	ErrWaitIPTimeout = "unable to SSH %s after %s seconds"
+	ErrWaitIPTimeout = "unable to SSH %s, reason: %v"
 
 	// ErrCantCreateVMAlreadyExist error msg
 	ErrCantCreateVMAlreadyExist = "unable to create VM %s, because another one exists"

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	glog "github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/Fred78290/kubernetes-aws-autoscaler/constantes"
 	"github.com/Fred78290/kubernetes-aws-autoscaler/context"
@@ -224,52 +225,53 @@ func (instance *Ec2Instance) NewContextWithTimeout(timeout time.Duration) *conte
 	return context.NewContext(timeout)
 }
 
-// WaitForIP wait ip a VM by name
-func (instance *Ec2Instance) WaitForIP(callback CallbackCheckIPReady) (*string, error) {
-	var err error
-	var ec2Instance *ec2.Instance
-	var code int64
+func (instance *Ec2Instance) pollImmediate(interval, timeout time.Duration, condition wait.ConditionFunc) error {
+	if timeout == 0 {
+		return wait.PollImmediateInfinite(interval, condition)
+	} else {
+		return wait.PollImmediate(interval, timeout, condition)
+	}
+}
 
+// WaitForIP wait ip a VM by name
+func (instance *Ec2Instance) WaitForIP(callback CallbackWaitSSHReady) (*string, error) {
 	glog.Debugf("WaitForIP: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
 
-	timeout := instance.config.Timeout * time.Second
-
-	for now := time.Now(); time.Since(now) < timeout; time.Sleep(time.Second) {
+	if err := instance.pollImmediate(time.Second, instance.config.Timeout*time.Second, func() (bool, error) {
+		var err error
+		var ec2Instance *ec2.Instance
 
 		if ec2Instance, err = instance.getEc2Instance(); err != nil {
-			return nil, err
+			return false, err
 		}
 
-		code = *ec2Instance.State.Code
+		code := *ec2Instance.State.Code
 
 		if code == 16 {
-			var address *string
 
 			if ec2Instance.PublicIpAddress != nil {
-				address = ec2Instance.PublicIpAddress
+				instance.AddressIP = ec2Instance.PublicIpAddress
 			} else {
-				address = ec2Instance.PrivateIpAddress
+				instance.AddressIP = ec2Instance.PrivateIpAddress
 			}
 
-			instance.AddressIP = address
+			glog.Debugf("WaitForIP: instance %s id (%s), using IP:%s", instance.InstanceName, instance.getInstanceID(), *instance.AddressIP)
 
-			glog.Debugf("WaitForIP: instance %s id (%s), using IP:%s", instance.InstanceName, instance.getInstanceID(), *address)
-
-			for time.Since(now) < timeout {
-				if err = callback.CheckIfIPIsReady(instance.InstanceName, *address); err == nil {
-					return address, nil
-				}
-
-				time.Sleep(time.Second)
+			if err = callback.WaitSSHReady(instance.InstanceName, *instance.AddressIP); err != nil {
+				return false, err
 			}
 
-			return address, fmt.Errorf(constantes.ErrWaitIPTimeout, instance.InstanceName, instance.config.Timeout.String())
+			return true, nil
 		} else if code != 0 {
-			return nil, fmt.Errorf(constantes.ErrWrongStateMachine, *ec2Instance.State.Name, instance.InstanceName)
+			return false, fmt.Errorf(constantes.ErrWrongStateMachine, *ec2Instance.State.Name, instance.InstanceName)
 		}
+
+		return false, nil
+	}); err != nil {
+		return nil, err
 	}
 
-	return nil, fmt.Errorf(constantes.ErrWaitIPTimeout, instance.InstanceName, instance.config.Timeout.String())
+	return instance.AddressIP, nil
 }
 
 // WaitForPowered wait ip a VM by name
@@ -277,31 +279,32 @@ func (instance *Ec2Instance) WaitForPowered() error {
 
 	glog.Debugf("WaitForPowered: instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
 
-	timeout := instance.config.Timeout * time.Second
+	return instance.pollImmediate(time.Second, instance.config.Timeout*time.Second, func() (bool, error) {
+		var err error
+		var ec2Instance *ec2.Instance
 
-	for now := time.Now(); time.Since(now) < timeout; time.Sleep(time.Second) {
-		if ec2Instance, err := instance.getEc2Instance(); err != nil {
+		if ec2Instance, err = instance.getEc2Instance(); err != nil {
 			glog.Debugf("WaitForPowered: instance %s id (%s), got an error %v", instance.InstanceName, instance.getInstanceID(), err)
 
-			return err
-		} else {
-
-			var code int64 = *ec2Instance.State.Code
-
-			if code == 16 {
-				glog.Debugf("WaitForPowered: ready instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
-				return nil
-			}
-
-			if code != 0 {
-				glog.Debugf("WaitForPowered: instance %s id (%s), unexpected state: %d", instance.InstanceName, instance.getInstanceID(), code)
-
-				return fmt.Errorf(constantes.ErrWrongStateMachine, *ec2Instance.State.Name, instance.InstanceName)
-			}
+			return false, err
 		}
-	}
 
-	return fmt.Errorf(constantes.ErrWaitIPTimeout, instance.InstanceName, instance.config.Timeout.String())
+		var code int64 = *ec2Instance.State.Code
+
+		if code != 16 {
+			if code == 0 {
+				return false, nil
+			}
+
+			glog.Debugf("WaitForPowered: instance %s id (%s), unexpected state: %d", instance.InstanceName, instance.getInstanceID(), code)
+
+			return false, fmt.Errorf(constantes.ErrWrongStateMachine, *ec2Instance.State.Name, instance.InstanceName)
+		}
+
+		glog.Debugf("WaitForPowered: ready instance %s id (%s)", instance.InstanceName, instance.getInstanceID())
+
+		return true, nil
+	})
 }
 
 func (instance *Ec2Instance) buildNetworkInterfaces(nodeIndex int, desiredENI *UserDefinedNetworkInterface) ([]*ec2.InstanceNetworkInterfaceSpecification, error) {

@@ -82,9 +82,9 @@ type Status struct {
 	Powered bool
 }
 
-// CallbackCheckIPReady callback to test if IP is up
-type CallbackCheckIPReady interface {
-	CheckIfIPIsReady(name, address string) error
+// CallbackWaitSSHReady callback to test if ssh become ready or return timeout error
+type CallbackWaitSSHReady interface {
+	WaitSSHReady(name, address string) error
 }
 
 func isNullOrEmpty(s string) bool {

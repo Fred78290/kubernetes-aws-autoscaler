@@ -49,7 +49,7 @@ func loadFromJson(fileName string) *ConfigurationTest {
 	return &testConfig
 }
 
-func (config *ConfigurationTest) CheckIfIPIsReady(nodename, address string) error {
+func (config *ConfigurationTest) WaitSSHReady(nodename, address string) error {
 	command := fmt.Sprintf("hostnamectl set-hostname %s", nodename)
 
 	_, err := utils.Sudo(&config.SSH, address, 1, command)

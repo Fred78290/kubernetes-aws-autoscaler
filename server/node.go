@@ -254,29 +254,33 @@ func (vm *AutoScalerServerNode) setNodeLabels(c types.ClientGenerator, nodeLabel
 	return nil
 }
 
-// CheckIfIPIsReady method SSH test IP
-func (vm *AutoScalerServerNode) CheckIfIPIsReady(nodename, address string) error {
-	var err error
+// WaitSSHReady method SSH test IP
+func (vm *AutoScalerServerNode) WaitSSHReady(nodename, address string) error {
+	return utils.PollImmediate(time.Second, time.Duration(vm.serverConfig.SSH.WaitSshReadyInSeconds)*time.Second, func() (bool, error) {
+		// Set hostname
+		if _, err := utils.Sudo(vm.serverConfig.SSH, address, time.Second, fmt.Sprintf("hostnamectl set-hostname %s", nodename)); err != nil {
+			if strings.HasSuffix(err.Error(), "connection refused") || strings.HasSuffix(err.Error(), "i/o timeout") {
+				return false, nil
+			}
 
-	// Set hostname
-	if _, err = utils.Sudo(vm.serverConfig.SSH, address, 1, fmt.Sprintf("hostnamectl set-hostname %s", nodename)); err != nil {
-		return err
-	}
-
-	// Node name and instance name could be differ when using AWS cloud provider
-	if vm.serverConfig.CloudProvider == "aws" {
-		var nodeName string
-
-		if nodeName, err = utils.Sudo(vm.serverConfig.SSH, address, 1, "curl -s http://169.254.169.254/latest/meta-data/local-hostname"); err != nil {
-			return err
+			return false, err
 		}
 
-		vm.NodeName = nodeName
+		// Node name and instance name could be differ when using AWS cloud provider
+		if vm.serverConfig.CloudProvider == "aws" {
 
-		glog.Debugf("Launch VM:%s set to nodeName: %s", nodename, nodeName)
-	}
+			if nodeName, err := utils.Sudo(vm.serverConfig.SSH, address, 1, "curl -s http://169.254.169.254/latest/meta-data/local-hostname"); err == nil {
+				vm.NodeName = nodeName
 
-	return nil
+				glog.Debugf("Launch VM:%s set to nodeName: %s", nodename, nodeName)
+			} else {
+				return false, err
+			}
+		}
+
+		return true, nil
+	})
+
 }
 
 func (vm *AutoScalerServerNode) WaitForIP() (*string, error) {
