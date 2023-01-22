@@ -124,3 +124,11 @@ func Values[M ~map[K]V, K comparable, V any](m M) []V {
 	}
 	return r
 }
+
+func PollImmediate(interval, timeout time.Duration, condition wait.ConditionFunc) error {
+	if timeout == 0 {
+		return wait.PollImmediateInfinite(interval, condition)
+	} else {
+		return wait.PollImmediate(interval, timeout, condition)
+	}
+}
