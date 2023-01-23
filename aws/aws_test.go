@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	glog "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -50,11 +51,17 @@ func loadFromJson(fileName string) *ConfigurationTest {
 }
 
 func (config *ConfigurationTest) WaitSSHReady(nodename, address string) error {
-	command := fmt.Sprintf("hostnamectl set-hostname %s", nodename)
+	return utils.PollImmediate(time.Second, time.Duration(config.SSH.WaitSshReadyInSeconds)*time.Second, func() (done bool, err error) {
+		// Set hostname
+		if _, err := utils.Sudo(&config.SSH, address, time.Second, fmt.Sprintf("hostnamectl set-hostname %s", nodename)); err != nil {
+			if strings.HasSuffix(err.Error(), "connection refused") || strings.HasSuffix(err.Error(), "i/o timeout") {
+				return false, nil
+			}
 
-	_, err := utils.Sudo(&config.SSH, address, 1, command)
-
-	return err
+			return false, err
+		}
+		return true, nil
+	})
 }
 
 func Test_AuthMethodKey(t *testing.T) {
