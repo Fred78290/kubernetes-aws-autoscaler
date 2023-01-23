@@ -82,9 +82,9 @@ type Status struct {
 	Powered bool
 }
 
-// CallbackCheckIPReady callback to test if IP is up
-type CallbackCheckIPReady interface {
-	CheckIfIPIsReady(name, address string) error
+// CallbackWaitSSHReady callback to test if ssh become ready or return timeout error
+type CallbackWaitSSHReady interface {
+	WaitSSHReady(name, address string) error
 }
 
 func isNullOrEmpty(s string) bool {
@@ -202,4 +202,12 @@ func (conf *Configuration) Create(nodeIndex int, nodeGroup, name, instanceType s
 	}
 
 	return instance, nil
+}
+
+func (conf *Configuration) Exists(name string) bool {
+	if _, err := GetEc2Instance(conf, name); err == nil {
+		return true
+	}
+
+	return false
 }

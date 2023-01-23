@@ -9,7 +9,8 @@ VERSION_MINOR ?= 25
 VERSION_BUILD ?= 5
 TAG?=v$(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_BUILD)
 FLAGS=
-ENVVAR=
+ENVVAR=CGO_ENABLED=0
+LDFLAGS?=-s
 GOOS?=$(shell go env GOOS)
 GOARCH?=$(shell go env GOARCH)
 REGISTRY?=fred78290
@@ -25,10 +26,9 @@ deps:
 build: $(addprefix build-arch-,$(ALL_ARCH))
 
 build-arch-%: deps clean-arch-%
-	$(ENVVAR) GOOS=$(GOOS) GOARCH=$* go build -ldflags="-X main.phVersion=$(TAG) -X main.phBuildDate=$(BUILD_DATE)" -a -o out/$(GOOS)/$*/aws-autoscaler
+	$(ENVVAR) GOOS=$(GOOS) GOARCH=$* go build -ldflags="-X main.phVersion=$(TAG) -X main.phBuildDate=$(BUILD_DATE) ${LDFLAGS}" -a -o out/$(GOOS)/$*/aws-autoscaler
 
 test-unit: clean build
-	go get -u github.com/aws/govmomi/vcsim
 	bash ./scripts/run-tests.sh
 
 make-image: $(addprefix make-image-arch-,$(ALL_ARCH))
