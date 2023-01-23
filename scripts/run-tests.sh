@@ -71,6 +71,7 @@ tee ./test/test.json <<EOF
     },
     "ssh": {
         "user": "${SEED_USER}",
+        "wait-ssh-ready-seconds": 180,
         "ssh-private-key": "${HOME}/.ssh/test_rsa"
     }
 }

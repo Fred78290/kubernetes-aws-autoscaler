@@ -24,7 +24,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	typesv1 "k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -43,6 +42,7 @@ type SingletonClientGenerator struct {
 	RequestTimeout       time.Duration
 	DeletionTimeout      time.Duration
 	MaxGracePeriod       time.Duration
+	NodeReadyTimeout     time.Duration
 	kubeClient           kubernetes.Interface
 	nodeManagerClientset managednodeClientset.Interface
 	apiExtensionClient   apiextensionClientset.Interface
@@ -156,7 +156,7 @@ func (p *SingletonClientGenerator) ApiExtentionClient() (apiextensionClientset.I
 	return p.apiExtensionClient, err
 }
 
-func (p *SingletonClientGenerator) WaitNodeToBeReady(nodeName string, timeToWaitInSeconds int) error {
+func (p *SingletonClientGenerator) WaitNodeToBeReady(nodeName string) error {
 	var nodeInfo *apiv1.Node
 	kubeclient, err := p.KubeClient()
 
@@ -167,11 +167,9 @@ func (p *SingletonClientGenerator) WaitNodeToBeReady(nodeName string, timeToWait
 	ctx := p.newRequestContext()
 	defer ctx.Cancel()
 
-	timeout := time.Duration(timeToWaitInSeconds) * time.Second
-
 	glog.Infof("Wait kubernetes node %s to be ready", nodeName)
 
-	if err = wait.PollImmediate(time.Second, timeout, func() (bool, error) {
+	if err = utils.PollImmediate(time.Second, p.NodeReadyTimeout, func() (bool, error) {
 		nodeInfo, err = kubeclient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 
 		if err != nil {
@@ -209,7 +207,7 @@ func (p *SingletonClientGenerator) awaitDeletion(pod apiv1.Pod, timeout time.Dur
 	ctx := p.newRequestContext()
 	defer ctx.Cancel()
 
-	return wait.PollImmediate(time.Second, timeout, func() (bool, error) {
+	return utils.PollImmediate(time.Second, timeout, func() (bool, error) {
 		got, err := kubeclient.CoreV1().Pods(pod.GetNamespace()).Get(ctx, pod.GetName(), metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			return true, nil
@@ -328,7 +326,7 @@ func (p *SingletonClientGenerator) cordonOrUncordonNode(nodeName string, flag bo
 	ctx := p.newRequestContext()
 	defer ctx.Cancel()
 
-	return wait.PollImmediate(retrySleep, time.Duration(p.RequestTimeout)*time.Second, func() (bool, error) {
+	return utils.PollImmediate(retrySleep, time.Duration(p.RequestTimeout)*time.Second, func() (bool, error) {
 		var node *apiv1.Node
 		kubeclient, err := p.KubeClient()
 
@@ -367,7 +365,7 @@ func (p *SingletonClientGenerator) SetProviderID(nodeName, providerID string) er
 	ctx := p.newRequestContext()
 	defer ctx.Cancel()
 
-	return wait.PollImmediate(retrySleep, time.Duration(p.RequestTimeout)*time.Second, func() (bool, error) {
+	return utils.PollImmediate(retrySleep, time.Duration(p.RequestTimeout)*time.Second, func() (bool, error) {
 		var node *apiv1.Node
 		kubeclient, err := p.KubeClient()
 
@@ -412,7 +410,7 @@ func (p *SingletonClientGenerator) MarkDrainNode(nodeName string) error {
 	ctx := p.newRequestContext()
 	defer ctx.Cancel()
 
-	return wait.PollImmediate(retrySleep, time.Duration(p.RequestTimeout)*time.Second, func() (bool, error) {
+	return utils.PollImmediate(retrySleep, time.Duration(p.RequestTimeout)*time.Second, func() (bool, error) {
 		var node *apiv1.Node
 		kubeclient, err := p.KubeClient()
 
@@ -539,7 +537,7 @@ func (p *SingletonClientGenerator) AnnoteNode(nodeName string, annotations map[s
 	ctx := p.newRequestContext()
 	defer ctx.Cancel()
 
-	return wait.PollImmediate(retrySleep, time.Duration(p.RequestTimeout)*time.Second, func() (bool, error) {
+	return utils.PollImmediate(retrySleep, p.RequestTimeout, func() (bool, error) {
 		var nodeInfo *apiv1.Node
 
 		kubeclient, err := p.KubeClient()
@@ -574,7 +572,7 @@ func (p *SingletonClientGenerator) LabelNode(nodeName string, labels map[string]
 	ctx := p.newRequestContext()
 	defer ctx.Cancel()
 
-	return wait.PollImmediate(retrySleep, time.Duration(p.RequestTimeout)*time.Second, func() (bool, error) {
+	return utils.PollImmediate(retrySleep, p.RequestTimeout, func() (bool, error) {
 		var nodeInfo *apiv1.Node
 		kubeclient, err := p.KubeClient()
 
@@ -618,7 +616,7 @@ func (p *SingletonClientGenerator) TaintNode(nodeName string, taints ...apiv1.Ta
 	ctx := p.newRequestContext()
 	defer ctx.Cancel()
 
-	return wait.PollImmediate(retrySleep, time.Duration(p.RequestTimeout)*time.Second, func() (bool, error) {
+	return utils.PollImmediate(retrySleep, p.RequestTimeout, func() (bool, error) {
 		var nodeInfo *apiv1.Node
 		kubeclient, err := p.KubeClient()
 
@@ -661,10 +659,11 @@ func (p *SingletonClientGenerator) TaintNode(nodeName string, taints ...apiv1.Ta
 
 func NewClientGenerator(cfg *types.Config) types.ClientGenerator {
 	return &SingletonClientGenerator{
-		KubeConfig:      cfg.KubeConfig,
-		APIServerURL:    cfg.APIServerURL,
-		RequestTimeout:  cfg.RequestTimeout,
-		DeletionTimeout: cfg.DeletionTimeout,
-		MaxGracePeriod:  cfg.MaxGracePeriod,
+		KubeConfig:       cfg.KubeConfig,
+		APIServerURL:     cfg.APIServerURL,
+		RequestTimeout:   cfg.RequestTimeout,
+		NodeReadyTimeout: cfg.NodeReadyTimeout,
+		DeletionTimeout:  cfg.DeletionTimeout,
+		MaxGracePeriod:   cfg.MaxGracePeriod,
 	}
 }
