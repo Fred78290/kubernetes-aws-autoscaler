@@ -27,6 +27,7 @@ type AutoScalerServerNodeType int32
 // autoScalerServerNodeStateString strings
 var autoScalerServerNodeStateString = []string{
 	"AutoScalerServerNodeStateNotCreated",
+	"AutoScalerServerNodeStateCreating",
 	"AutoScalerServerNodeStateRunning",
 	"AutoScalerServerNodeStateStopped",
 	"AutoScalerServerNodeStateDeleted",
@@ -36,6 +37,9 @@ var autoScalerServerNodeStateString = []string{
 const (
 	// AutoScalerServerNodeStateNotCreated not created state
 	AutoScalerServerNodeStateNotCreated = iota
+
+	// AutoScalerServerNodeStateCreating running state
+	AutoScalerServerNodeStateCreating
 
 	// AutoScalerServerNodeStateRunning running state
 	AutoScalerServerNodeStateRunning
@@ -89,6 +93,12 @@ func (s AutoScalerServerNodeState) String() string {
 	return autoScalerServerNodeStateString[s]
 }
 
+func (vm *AutoScalerServerNode) waitReady(c types.ClientGenerator) error {
+	glog.Debugf("AutoScalerNode::waitReady, node:%s", vm.NodeName)
+
+	return c.WaitNodeToBeReady(vm.NodeName)
+}
+
 func (vm *AutoScalerServerNode) recopyEtcdSslFilesIfNeeded() error {
 	var err error
 
@@ -129,7 +139,7 @@ func (vm *AutoScalerServerNode) recopyKubernetesPKIIfNeeded() error {
 	return err
 }
 
-func (vm *AutoScalerServerNode) kubeAdmJoin() error {
+func (vm *AutoScalerServerNode) kubeAdmJoin(c types.ClientGenerator) error {
 	kubeAdm := vm.serverConfig.KubeAdm
 
 	glog.Infof("Register node in cluster for instance: %s in node group: %s", vm.InstanceName, vm.NodeGroupID)
@@ -163,7 +173,22 @@ func (vm *AutoScalerServerNode) kubeAdmJoin() error {
 		return fmt.Errorf("unable to execute command: %s, output: %s, reason:%v", command, out, err)
 	}
 
-	return nil
+	// To be sure, with kubeadm 1.26.1, the kubelet is not correctly restarted
+	time.Sleep(5 * time.Second)
+
+	return utils.PollImmediate(5*time.Second, time.Duration(vm.serverConfig.SSH.WaitSshReadyInSeconds)*time.Second, func() (done bool, err error) {
+		if node, err := c.GetNode(vm.NodeName); err == nil && node != nil {
+			return true, nil
+		}
+
+		glog.Infof("Restart kubelet for node:%s for nodegroup: %s", vm.NodeName, vm.NodeGroupID)
+
+		if out, err := utils.Sudo(vm.serverConfig.SSH, vm.IPAddress, vm.awsConfig.Timeout, "systemctl restart kubelet"); err != nil {
+			return false, fmt.Errorf("unable to restart kubelet, output: %s, reason:%v", out, err)
+		}
+
+		return false, nil
+	})
 }
 
 func (vm *AutoScalerServerNode) retrieveNodeInfo(c types.ClientGenerator) error {
@@ -229,29 +254,33 @@ func (vm *AutoScalerServerNode) setNodeLabels(c types.ClientGenerator, nodeLabel
 	return nil
 }
 
-// CheckIfIPIsReady method SSH test IP
-func (vm *AutoScalerServerNode) CheckIfIPIsReady(nodename, address string) error {
-	var err error
+// WaitSSHReady method SSH test IP
+func (vm *AutoScalerServerNode) WaitSSHReady(nodename, address string) error {
+	return utils.PollImmediate(time.Second, time.Duration(vm.serverConfig.SSH.WaitSshReadyInSeconds)*time.Second, func() (bool, error) {
+		// Set hostname
+		if _, err := utils.Sudo(vm.serverConfig.SSH, address, time.Second, fmt.Sprintf("hostnamectl set-hostname %s", nodename)); err != nil {
+			if strings.HasSuffix(err.Error(), "connection refused") || strings.HasSuffix(err.Error(), "i/o timeout") {
+				return false, nil
+			}
 
-	// Set hostname
-	if _, err = utils.Sudo(vm.serverConfig.SSH, address, 1, fmt.Sprintf("hostnamectl set-hostname %s", nodename)); err != nil {
-		return err
-	}
-
-	// Node name and instance name could be differ when using AWS cloud provider
-	if vm.serverConfig.CloudProvider == "aws" {
-		var nodeName string
-
-		if nodeName, err = utils.Sudo(vm.serverConfig.SSH, address, 1, "curl -s http://169.254.169.254/latest/meta-data/local-hostname"); err != nil {
-			return err
+			return false, err
 		}
 
-		vm.NodeName = nodeName
+		// Node name and instance name could be differ when using AWS cloud provider
+		if vm.serverConfig.CloudProvider == "aws" {
 
-		glog.Debugf("Launch VM:%s set to nodeName: %s", nodename, nodeName)
-	}
+			if nodeName, err := utils.Sudo(vm.serverConfig.SSH, address, 1, "curl -s http://169.254.169.254/latest/meta-data/local-hostname"); err == nil {
+				vm.NodeName = nodeName
 
-	return nil
+				glog.Debugf("Launch VM:%s set to nodeName: %s", nodename, nodeName)
+			} else {
+				return false, err
+			}
+		}
+
+		return true, nil
+	})
+
 }
 
 func (vm *AutoScalerServerNode) WaitForIP() (*string, error) {
@@ -333,13 +362,20 @@ func (vm *AutoScalerServerNode) launchVM(c types.ClientGenerator, nodeLabels, sy
 
 	glog.Infof("Launch VM:%s for nodegroup: %s", vm.InstanceName, vm.NodeGroupID)
 
+	if vm.State != AutoScalerServerNodeStateNotCreated {
+		return fmt.Errorf(constantes.ErrVMAlreadyCreated, vm.NodeName)
+	}
+
+	if aws.Exists(vm.NodeName) {
+		glog.Warnf(constantes.ErrVMAlreadyExists, vm.NodeName)
+		return fmt.Errorf(constantes.ErrVMAlreadyExists, vm.NodeName)
+	}
+
+	vm.State = AutoScalerServerNodeStateCreating
+
 	if vm.NodeType != AutoScalerServerNodeAutoscaled && vm.NodeType != AutoScalerServerNodeManaged {
 
 		err = fmt.Errorf(constantes.ErrVMNotProvisionnedByMe, vm.InstanceName)
-
-	} else if vm.State != AutoScalerServerNodeStateNotCreated {
-
-		err = fmt.Errorf(constantes.ErrVMAlreadyCreated, vm.InstanceName)
 
 	} else if vm.runningInstance, err = aws.Create(vm.NodeIndex, vm.NodeGroupID, vm.InstanceName, vm.InstanceType, vm.DiskType, vm.DiskSize, vm.kubeletDefault(), vm.desiredENI); err != nil {
 
@@ -369,15 +405,15 @@ func (vm *AutoScalerServerNode) launchVM(c types.ClientGenerator, nodeLabels, sy
 
 		err = fmt.Errorf(constantes.ErrUpdateEtcdSslFailed, vm.NodeName, err)
 
-	} else if err = vm.kubeAdmJoin(); err != nil {
+	} else if err = vm.kubeAdmJoin(c); err != nil {
 
 		err = fmt.Errorf(constantes.ErrKubeAdmJoinFailed, vm.InstanceName, err)
 
-	} else if err = c.SetProviderID(vm.NodeName, vm.generateProviderID()); err != nil {
+	} else if err = vm.setProviderID(c); err != nil {
 
 		err = fmt.Errorf(constantes.ErrProviderIDNotConfigured, vm.NodeName, err)
 
-	} else if err = c.WaitNodeToBeReady(vm.NodeName, int(aws.Timeout)); err != nil {
+	} else if err = vm.waitReady(c); err != nil {
 
 		err = fmt.Errorf(constantes.ErrNodeIsNotReady, vm.InstanceName)
 
@@ -584,6 +620,14 @@ func (vm *AutoScalerServerNode) statusVM() (AutoScalerServerNodeState, error) {
 	}
 
 	return AutoScalerServerNodeStateUndefined, fmt.Errorf(constantes.ErrAutoScalerInfoNotFound, vm.InstanceName)
+}
+
+func (vm *AutoScalerServerNode) setProviderID(c types.ClientGenerator) error {
+	if vm.serverConfig.UseControllerManager != nil && *vm.serverConfig.UseControllerManager == false {
+		return c.SetProviderID(vm.NodeName, vm.generateProviderID())
+	}
+
+	return nil
 }
 
 func (vm *AutoScalerServerNode) generateProviderID() string {
