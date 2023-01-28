@@ -10,8 +10,12 @@ Kubernetes autoscaler for aws
 
 * 1.25.6
     - This version is supported kubernetes v1.25
+* 1.25.7
+    - This version is supported kubernetes v1.25 and support k3s
 * 1.26.1
     - This version is supported kubernetes v1.26
+* 1.26.2
+    - This version is supported kubernetes v1.26 and support k3s
 
 ## How it works
 
@@ -40,6 +44,10 @@ You can do it from scrash or you can use script from projetct [autoscaled-master
 The build process use make file. The simplest way to build is `make container`
 
 # New features
+
+## Use k3s
+
+Instead using **kubeadm** as kubernetes deployment tool, it is possible to use **k3s**
 
 ## Use the vanilla autoscaler with extern gRPC cloud provider
 

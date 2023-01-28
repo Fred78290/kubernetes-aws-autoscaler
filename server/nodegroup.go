@@ -303,13 +303,19 @@ func (g *AutoScalerServerNodeGroup) addManagedNode(crd *v1alpha1.ManagedNode) (*
 			desiredENI:       desiredENI,
 		}
 
+		annoteMaster := ""
+
+		if g.configuration.UseK3S != nil && *g.configuration.UseK3S {
+			annoteMaster = "true"
+		}
+
 		// Add system labels
 		if controlPlane {
-			node.ExtraLabels[constantes.NodeLabelMasterRole] = ""
-			node.ExtraLabels[constantes.NodeLabelControlPlaneRole] = ""
+			node.ExtraLabels[constantes.NodeLabelMasterRole] = annoteMaster
+			node.ExtraLabels[constantes.NodeLabelControlPlaneRole] = annoteMaster
 			node.ExtraLabels["master"] = "true"
 		} else {
-			node.ExtraLabels[constantes.NodeLabelWorkerRole] = ""
+			node.ExtraLabels[constantes.NodeLabelWorkerRole] = annoteMaster
 			node.ExtraLabels["worker"] = "true"
 		}
 
@@ -322,8 +328,12 @@ func (g *AutoScalerServerNodeGroup) addManagedNode(crd *v1alpha1.ManagedNode) (*
 }
 
 func (g *AutoScalerServerNodeGroup) prepareNodes(c types.ClientGenerator, delta int) ([]*AutoScalerServerNode, error) {
-
 	tempNodes := make([]*AutoScalerServerNode, 0, delta)
+	annoteMaster := ""
+
+	if g.configuration.UseK3S != nil && *g.configuration.UseK3S {
+		annoteMaster = "true"
+	}
 
 	if g.Status != NodegroupCreated {
 		glog.Debugf("AutoScalerServerNodeGroup::addNodes, nodeGroupID:%s -> g.status != nodegroupCreated", g.NodeGroupIdentifier)
@@ -339,7 +349,7 @@ func (g *AutoScalerServerNodeGroup) prepareNodes(c types.ClientGenerator, delta 
 
 			extraAnnotations := types.KubernetesLabel{}
 			extraLabels := types.KubernetesLabel{
-				constantes.NodeLabelWorkerRole: "",
+				constantes.NodeLabelWorkerRole: annoteMaster,
 				"worker":                       "true",
 			}
 
