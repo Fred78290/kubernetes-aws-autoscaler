@@ -133,7 +133,7 @@ data:
         "controlplane-name-prefix": "master",
         "nodePrice": 0,
         "podPrice": 0,
-        "image": "focal-k8s-cni-aws-v1.26.1-containerd-amd64",
+        "image": "focal-k8s-cni-aws-v1.27.1-containerd-amd64",
         "cloud-provider": "external",
         "optionals": {
             "pricing": false,
@@ -854,7 +854,7 @@ spec:
             - name: cluster-socket
               mountPath: /var/run/cluster-autoscaler
       containers:
-        - image: "fred78290/aws-autoscaler:v1.26.1"
+        - image: "fred78290/aws-autoscaler:v1.27.1"
           name: aws-autoscaler
           resources:
             limits:
@@ -885,7 +885,7 @@ spec:
               mountPath: /etc/etcd/ssl
             - name: kubernetes-pki
               mountPath: /etc/kubernetes/pki
-        - image: "k8s.gcr.io/autoscaling/cluster-autoscaler:v1.26.1"
+        - image: "k8s.gcr.io/autoscaling/cluster-autoscaler:v1.27.1"
           name: cluster-autoscaler
           resources:
             limits:

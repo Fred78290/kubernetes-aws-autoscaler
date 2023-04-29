@@ -132,7 +132,7 @@ data:
         "controlplane-name-prefix": "master",
         "nodePrice": 0,
         "podPrice": 0,
-        "image": "focal-k8s-cni-aws-v1.26.1-containerd-amd64",
+        "image": "focal-k8s-cni-aws-v1.27.1-containerd-amd64",
         "cloud-provider": "external",
         "optionals": {
             "pricing": false,
