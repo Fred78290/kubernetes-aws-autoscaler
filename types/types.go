@@ -389,7 +389,7 @@ func allLogLevelsAsStrings() []string {
 }
 
 func (cfg *Config) ParseFlags(args []string, version string) error {
-	app := kingpin.New("aws-autoscaler", "Kubernetes AWS autoscaler create EC2 instances at demand for autoscaling.\n\nNote that all flags may be replaced with env vars - `--flag` -> `VMWARE_AUTOSCALER_FLAG=1` or `--flag value` -> `VMWARE_AUTOSCALER_FLAG=value`")
+	app := kingpin.New("aws-autoscaler", "Kubernetes AWS autoscaler create EC2 instances at demand for autoscaling.\n\nNote that all flags may be replaced with env vars - `--flag` -> `AWS_AUTOSCALER_FLAG=1` or `--flag value` -> `AWS_AUTOSCALER_FLAG=value`")
 
 	//	app.Version(version)
 	app.HelpFlag.Short('h')
