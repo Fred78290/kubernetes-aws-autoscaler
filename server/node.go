@@ -691,7 +691,9 @@ func (vm *AutoScalerServerNode) setServerConfiguration(config *types.AutoScalerS
 func (vm *AutoScalerServerNode) cleanOnLaunchError(c types.ClientGenerator, err error) {
 	glog.Errorf(constantes.ErrUnableToLaunchVM, vm.InstanceName, err)
 
-	if status, _ := vm.statusVM(); status != AutoScalerServerNodeStateNotCreated {
+	if *vm.serverConfig.DebugMode {
+		glog.Warningf("Debug mode enabled, don't delete VM: %s for inspection", vm.InstanceName)
+	} else if status, _ := vm.statusVM(); status != AutoScalerServerNodeStateNotCreated {
 		if e := vm.deleteVM(c); e != nil {
 			glog.Errorf(constantes.ErrUnableToDeleteVM, vm.InstanceName, e)
 		}
