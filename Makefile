@@ -6,7 +6,7 @@ all: $(addprefix build-arch-,$(ALL_ARCH))
 
 VERSION_MAJOR ?= 1
 VERSION_MINOR ?= 25
-VERSION_BUILD ?= 5
+VERSION_BUILD ?= 9
 TAG?=v$(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_BUILD)
 FLAGS=
 ENVVAR=CGO_ENABLED=0
@@ -26,7 +26,7 @@ deps:
 build: $(addprefix build-arch-,$(ALL_ARCH))
 
 build-arch-%: deps clean-arch-%
-	$(ENVVAR) GOOS=$(GOOS) GOARCH=$* go build -ldflags="-X main.phVersion=$(TAG) -X main.phBuildDate=$(BUILD_DATE) ${LDFLAGS}" -a -o out/$(GOOS)/$*/aws-autoscaler
+	$(ENVVAR) GOOS=$(GOOS) GOARCH=$* go build -buildvcs=false -ldflags="-X main.phVersion=$(TAG) -X main.phBuildDate=$(BUILD_DATE) ${LDFLAGS}" -a -o out/$(GOOS)/$*/aws-autoscaler
 
 test-unit: clean build
 	bash ./scripts/run-tests.sh
