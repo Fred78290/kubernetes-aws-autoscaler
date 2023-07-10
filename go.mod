@@ -1,6 +1,6 @@
 module github.com/Fred78290/kubernetes-aws-autoscaler
 
-go 1.19
+go 1.20
 
 require (
 	github.com/alecthomas/kingpin v2.2.6+incompatible
