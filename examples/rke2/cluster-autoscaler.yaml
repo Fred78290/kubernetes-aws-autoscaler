@@ -1,0 +1,879 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    k8s-addon: cluster-autoscaler.addons.k8s.io
+    k8s-app: cluster-autoscaler
+  name: cluster-autoscaler
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  name: cluster-autoscaler
+  labels:
+    k8s-addon: cluster-autoscaler.addons.k8s.io
+    k8s-app: cluster-autoscaler
+rules:
+  - apiGroups: [""]
+    resources: ["events", "endpoints"]
+    verbs: ["create", "patch"]
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["pods/status"]
+    verbs: ["update"]
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    resourceNames: ["cluster-autoscaler"]
+    verbs: ["get", "update"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["watch", "list", "get", "update"]
+  - apiGroups: [""]
+    resources:
+      [
+        "pods",
+        "services",
+        "replicationcontrollers",
+        "persistentvolumeclaims",
+        "persistentvolumes",
+      ]
+    verbs: ["watch", "list", "get"]
+  - apiGroups: ["extensions"]
+    resources: ["replicasets", "daemonsets"]
+    verbs: ["watch", "list", "get"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["watch", "list"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets", "replicasets", "daemonsets"]
+    verbs: ["watch", "list", "get"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["watch", "list", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: Role
+metadata:
+  name: cluster-autoscaler
+  namespace: kube-system
+  labels:
+    k8s-addon: cluster-autoscaler.addons.k8s.io
+    k8s-app: cluster-autoscaler
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["cluster-autoscaler-status"]
+    verbs: ["delete", "get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: cluster-autoscaler
+  labels:
+    k8s-addon: cluster-autoscaler.addons.k8s.io
+    k8s-app: cluster-autoscaler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-autoscaler
+subjects:
+  - kind: ServiceAccount
+    name: cluster-autoscaler
+    namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: RoleBinding
+metadata:
+  name: cluster-autoscaler
+  namespace: kube-system
+  labels:
+    k8s-addon: cluster-autoscaler.addons.k8s.io
+    k8s-app: cluster-autoscaler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cluster-autoscaler
+subjects:
+  - kind: ServiceAccount
+    name: cluster-autoscaler
+    namespace: kube-system
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloud-config
+data:
+  grpc.conf: |-
+    address: unix:/var/run/cluster-autoscaler/aws.sock
+    identifier: aws
+    timeout: 120
+  kubernetes-vmware-autoscaler.json: |
+    {
+        "use-external-etcd": false,
+        "src-etcd-ssl-dir": "/etc/kubernetes/pki/etcd",
+        "dst-etcd-ssl-dir": "/etc/kubernetes/pki/etcd",
+        "kubernetes-pki-srcdir": "/etc/kubernetes/pki",
+        "kubernetes-pki-dstdir": "/etc/kubernetes/pki",
+        "network": "unix",
+        "listen": "/var/run/cluster-autoscaler/aws.sock",
+        "secret": "aws",
+        "minNode": 0,
+        "maxNode": 9,
+        "maxPods": 17,
+        "node-name-prefix": "autoscaled",
+        "managed-name-prefix": "managed",
+        "controlplane-name-prefix": "master",
+        "nodePrice": 0,
+        "podPrice": 0,
+        "image": "focal-k8s-rke2-aws-v1.27.9-containerd-amd64",
+        "cloud-provider": "external",
+        "optionals": {
+            "pricing": false,
+            "getAvailableMachineTypes": false,
+            "newNodeGroup": false,
+            "templateNodeInfo": false,
+            "createNodeGroup": false,
+            "deleteNodeGroup": false
+        },
+        "rke2": {
+            "address": "172.30.73.121:6443",
+            "token": "m1vmoc.3ox7sartsgk8f14l",
+            "datastore-endpoint": "",
+            "extras-commands": []
+        },
+        "default-machine": "t3a.medium",
+        "machines": {
+            "t3a.nano": {
+                "price": 0.0051,
+                "memsize": 512,
+                "vcpus": 2,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "t3a.micro": {
+                "price": 0.0102,
+                "memsize": 1024,
+                "vcpus": 2,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "t3a.small": {
+                "price": 0.0204,
+                "memsize": 2048,
+                "vcpus": 2,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "t3a.medium": {
+                "price": 0.0408,
+                "memsize": 4096,
+                "vcpus": 2,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "t3a.large": {
+                "price": 0.0816,
+                "memsize": 8192,
+                "vcpus": 2,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "t3a.xlarge": {
+                "price": 0.1632,
+                "memsize": 16384,
+                "vcpus": 4,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "t3a.2xlarge": {
+                "price": 0.3264,
+                "memsize": 32768,
+                "vcpus": 8,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "t3.nano": {
+                "price": 0.0057,
+                "memsize": 512,
+                "vcpus": 2,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "t3.micro": {
+                "price": 0.0114,
+                "memsize": 1024,
+                "vcpus": 2,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "t3.small": {
+                "price": 0.0228,
+                "memsize": 2048,
+                "vcpus": 2,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "t3.medium": {
+                "price": 0.0456,
+                "memsize": 4096,
+                "vcpus": 2,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "t3.large": {
+                "price": 0.0912,
+                "memsize": 8192,
+                "vcpus": 2,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "t3.xlarge": {
+                "price": 0.1824,
+                "memsize": 16384,
+                "vcpus": 4,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "t3.2xlarge": {
+                "price": 0.3648,
+                "memsize": 32768,
+                "vcpus": 8,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c5.large": {
+                "vcpus": 2,
+                "memsize": 4096,
+                "price": 0.101,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c5.xlarge": {
+                "vcpus": 4,
+                "memsize": 8192,
+                "price": 0.202,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c5.2xlarge": {
+                "vcpus": 8,
+                "memsize": 16384,
+                "price": 0.404,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c5.4xlarge": {
+                "vcpus": 16,
+                "memsize": 32768,
+                "price": 0.808,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c5.9xlarge": {
+                "vcpus": 36,
+                "memsize": 73728,
+                "price": 1.818,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c5.12xlarge": {
+                "vcpus": 48,
+                "memsize": 98304,
+                "price": 2.424,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c5.18xlarge": {
+                "vcpus": 72,
+                "memsize": 147456,
+                "price": 3.636,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c5.24xlarge": {
+                "vcpus": 96,
+                "memsize": 196608,
+                "price": 4.848,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c5a.large": {
+                "vcpus": 2,
+                "memsize": 4096,
+                "price": 0.091,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c5a.xlarge": {
+                "vcpus": 4,
+                "memsize": 8192,
+                "price": 0.182,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c5a.2xlarge": {
+                "vcpus": 8,
+                "memsize": 16384,
+                "price": 0.364,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c5a.4xlarge": {
+                "vcpus": 16,
+                "memsize": 32768,
+                "price": 0.728,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c5a.8xlarge": {
+                "vcpus": 32,
+                "memsize": 65536,
+                "price": 1.456,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c5a.12xlarge": {
+                "vcpus": 48,
+                "memsize": 98304,
+                "price": 2.184,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c5a.16xlarge": {
+                "vcpus": 64,
+                "memsize": 131072,
+                "price": 2.912,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c5a.24xlarge": {
+                "vcpus": 96,
+                "memsize": 196608,
+                "price": 4.368,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m5a.large": {
+                "price": 0.096,
+                "memsize": 8192,
+                "vcpus": 2,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m5a.xlarge": {
+                "price": 0.192,
+                "memsize": 16384,
+                "vcpus": 4,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m5a.2xlarge": {
+                "price": 0.384,
+                "memsize": 32768,
+                "vcpus": 8,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m5a.4xlarge": {
+                "price": 0.768,
+                "memsize": 65536,
+                "vcpus": 16,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m5a.8xlarge": {
+                "price": 1.536,
+                "memsize": 131072,
+                "vcpus": 32,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m5a.12xlarge": {
+                "price": 2.304,
+                "memsize": 196608,
+                "vcpus": 48,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m5a.16xlarge": {
+                "price": 3.072,
+                "memsize": 196608,
+                "vcpus": 64,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m5.large": {
+                "price": 0.107,
+                "memsize": 8192,
+                "vcpus": 2,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m5.xlarge": {
+                "price": 0.214,
+                "memsize": 16384,
+                "vcpus": 4,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m5.2xlarge": {
+                "price": 0.428,
+                "memsize": 32768,
+                "vcpus": 8,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m5.4xlarge": {
+                "price": 0.856,
+                "memsize": 65536,
+                "vcpus": 16,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m5.8xlarge": {
+                "price": 1.712,
+                "memsize": 131072,
+                "vcpus": 32,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m5.12xlarge": {
+                "price": 2.568,
+                "memsize": 196608,
+                "vcpus": 48,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m5.16xlarge": {
+                "price": 3.424,
+                "memsize": 196608,
+                "vcpus": 64,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r6i.large": {
+                "vcpus": 2,
+                "memsize": 16384,
+                "price": 0.148,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r6i.xlarge": {
+                "vcpus": 4,
+                "memsize": 32768,
+                "price": 0.296,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r6i.2xlarge": {
+                "vcpus": 8,
+                "memsize": 65536,
+                "price": 0.592,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r5.large": {
+                "vcpus": 2,
+                "memsize": 16384,
+                "price": 0.148,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r5.xlarge": {
+                "vcpus": 4,
+                "memsize": 32768,
+                "price": 0.296,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r5.2xlarge": {
+                "vcpus": 8,
+                "memsize": 65536,
+                "price": 0.592,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r5.4xlarge": {
+                "vcpus": 16,
+                "memsize": 131072,
+                "price": 1.184,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r5.8xlarge": {
+                "vcpus": 32,
+                "memsize": 262144,
+                "price": 2.368,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r5.12xlarge": {
+                "vcpus": 48,
+                "memsize": 393216,
+                "price": 3.552,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r5.16xlarge": {
+                "vcpus": 64,
+                "memsize": 524288,
+                "price": 4.736,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r5.24xlarge": {
+                "vcpus": 96,
+                "memsize": 786432,
+                "price": 7.104,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r5a.large": {
+                "vcpus": 2,
+                "memsize": 16384,
+                "price": 0.133,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r5a.xlarge": {
+                "vcpus": 4,
+                "memsize": 32768,
+                "price": 0.266,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r5a.2xlarge": {
+                "vcpus": 8,
+                "memsize": 65536,
+                "price": 0.532,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r5a.4xlarge": {
+                "vcpus": 16,
+                "memsize": 131072,
+                "price": 1.064,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r5a.8xlarge": {
+                "vcpus": 32,
+                "memsize": 262144,
+                "price": 2.128,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r5a.12xlarge": {
+                "vcpus": 48,
+                "memsize": 393216,
+                "price": 3.192,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r5a.16xlarge": {
+                "vcpus": 64,
+                "memsize": 524288,
+                "price": 4.256,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r5a.24xlarge": {
+                "vcpus": 96,
+                "memsize": 786432,
+                "price": 6.384,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r6i.4xlarge": {
+                "vcpus": 16,
+                "memsize": 131072,
+                "price": 1.184,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r6i.8xlarge": {
+                "vcpus": 32,
+                "memsize": 262144,
+                "price": 2.368,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r6i.12xlarge": {
+                "vcpus": 48,
+                "memsize": 393216,
+                "price": 3.552,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r6i.16xlarge": {
+                "vcpus": 64,
+                "memsize": 524288,
+                "price": 4.736,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r6i.24xlarge": {
+                "vcpus": 96,
+                "memsize": 786432,
+                "price": 7.104,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "r6i.32xlarge": {
+                "vcpus": 128,
+                "memsize": 1048576,
+                "price": 9.472,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m6i.large": {
+                "vcpus": 2,
+                "memsize": 8192,
+                "price": 0.112,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m6i.xlarge": {
+                "vcpus": 4,
+                "memsize": 16384,
+                "price": 0.224,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m6i.2xlarge": {
+                "vcpus": 8,
+                "memsize": 32768,
+                "price": 0.448,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m6i.4xlarge": {
+                "vcpus": 16,
+                "memsize": 65536,
+                "price": 0.896,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m6i.8xlarge": {
+                "vcpus": 32,
+                "memsize": 131072,
+                "price": 1.792,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m6i.12xlarge": {
+                "vcpus": 48,
+                "memsize": 196608,
+                "price": 2.688,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m6i.16xlarge": {
+                "vcpus": 64,
+                "memsize": 262144,
+                "price": 3.584,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m6i.24xlarge": {
+                "vcpus": 96,
+                "memsize": 393216,
+                "price": 5.376,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "m6i.32xlarge": {
+                "vcpus": 128,
+                "memsize": 524288,
+                "price": 7.168,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c6i.large": {
+                "vcpus": 2,
+                "memsize": 4096,
+                "price": 0.101,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c6i.xlarge": {
+                "vcpus": 4,
+                "memsize": 8192,
+                "price": 0.202,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c6i.2xlarge": {
+                "vcpus": 8,
+                "memsize": 16384,
+                "price": 0.404,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c6i.4xlarge": {
+                "vcpus": 16,
+                "memsize": 32768,
+                "price": 0.808,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c6i.8xlarge": {
+                "vcpus": 32,
+                "memsize": 65536,
+                "price": 1.616,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c6i.12xlarge": {
+                "vcpus": 48,
+                "memsize": 98304,
+                "price": 2.424,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c6i.16xlarge": {
+                "vcpus": 64,
+                "memsize": 131072,
+                "price": 3.232,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c6i.24xlarge": {
+                "vcpus": 96,
+                "memsize": 196608,
+                "price": 4.848,
+                "diskType": "gp2",
+                "diskSize": 10
+            },
+            "c6i.32xlarge": {
+                "vcpus": 128,
+                "memsize": 262144,
+                "price": 6.464,
+                "diskType": "gp2",
+                "diskSize": 10
+            }
+        },
+        "sync-folder": {},
+        "ssh-infos": {
+            "wait-ssh-ready-seconds": 180,
+            "user": "ubuntu",
+            "ssh-private-key": "/etc/ssh/id_rsa"
+        },
+        "aws": {
+            "aws-ca-k8s": {
+                "accessKey": "12345678",
+                "secretKey": "12345678",
+                "token": "",
+                "profile": "acme",
+                "region": "eu-west-1",
+                "keyName": "aws-k8s-key",
+                "ami": "ami-12345678",
+                "iam-role-arn": "arn:aws:iam::12345678:instance-profile/kubernetes-worker-profile",
+                "timeout": 120,
+                "tags": [
+                    {
+                        "key": "CustomTag",
+                        "value": "CustomValue"
+                    }
+                ],
+                "network": {
+                    "route53": "Z12345678",
+                    "privateZoneName": "acme.priv",
+                    "accessKey": "12345678",
+                    "secretKey": "12345678",
+                    "token": "",
+                    "profile": "acme",
+                    "region": "eu-west-1",
+                    "eni": [
+                        {
+                            "subnets": [
+                                "subnet-12345678",
+                                "subnet-45789",
+                                "subnet-123458933"
+                            ],
+                            "securityGroup": "sg-123456789",
+                            "publicIP": false
+                        }
+                    ]
+                }
+            }
+        }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cluster-autoscaler
+  namespace: kube-system
+  labels:
+    app: cluster-autoscaler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cluster-autoscaler
+  template:
+    metadata:
+      labels:
+        app: cluster-autoscaler
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ""
+    spec:
+      serviceAccountName: cluster-autoscaler
+      containers:
+        - image: fred78290/cluster-autoscaler:v1.13.1
+          name: cluster-autoscaler
+          resources:
+            limits:
+              cpu: 100m
+              memory: 300Mi
+            requests:
+              cpu: 100m
+              memory: 300Mi
+          command:
+            - ./cluster-autoscaler
+            - --v=4
+            - --stderrthreshold=info
+            - --cloud-provider=grpc
+            - --cloud-config=/etc/cluster-autoscaler/grpc.conf
+            - --nodes=$(MINNODES):$(MAXNODES):true/$(NODEGROUP_ID)
+            - --max-nodes-total=3
+            - --cores-total=0:16
+            - --memory-total=2:24
+            - --node-autoprovisioning-enabled
+            - --max-autoprovisioned-node-group-count=1
+            - --scale-down-enabled=true
+            - --scale-down-delay-after-add=1m
+            - --scale-down-delay-after-delete=1m
+            - --scale-down-delay-after-failure=1m
+            - --scale-down-unneeded-time=1m
+            - --scale-down-unready-time=1m"
+          imagePullPolicy: "Always"
+          env:
+            - name: MINNODES
+              value: "1"
+            - name: MAXNODES
+              value: "5"
+            - name: NODEGROUP_ID
+              value: aws-ca-k8s
+          volumeMounts:
+            - name: ssl-certs
+              mountPath: /etc/ssl/certs/ca-certificates.crt
+              readOnly: true
+            - name: cloud-config
+              mountPath: /etc/cluster-autoscaler
+              readOnly: true
+      volumes:
+        - name: cloud-config
+          configMap:
+            name: cloud-config
+        - name: ssl-certs
+          hostPath:
+            path: "/etc/ssl/certs/ca-certificates.crt"

@@ -133,7 +133,7 @@ data:
         "controlplane-name-prefix": "master",
         "nodePrice": 0,
         "podPrice": 0,
-        "image": "focal-k8s-cni-aws-v1.27.1-containerd-amd64",
+        "image": "focal-k8s-rke2-aws-v1.27.9-containerd-amd64",
         "cloud-provider": "external",
         "optionals": {
             "pricing": false,
@@ -143,13 +143,11 @@ data:
             "createNodeGroup": false,
             "deleteNodeGroup": false
         },
-        "kubeadm": {
+        "rke2": {
             "address": "172.30.73.121:6443",
             "token": "m1vmoc.3ox7sartsgk8f14l",
-            "ca": "sha256:70ecc6f82ad1a6938d6fbd4865f4a8d0fb4fcec70cea4140dff3b657b9600c0e",
-            "extras-args": [
-                "--ignore-preflight-errors=All"
-            ]
+            "datastore-endpoint": "",
+            "extras-commands": []
         },
         "default-machine": "t3a.medium",
         "machines": {
@@ -854,7 +852,7 @@ spec:
             - name: cluster-socket
               mountPath: /var/run/cluster-autoscaler
       containers:
-        - image: "fred78290/aws-autoscaler:v1.27.1"
+        - image: "fred78290/aws-autoscaler:v1.27.9"
           name: aws-autoscaler
           resources:
             limits:
@@ -885,7 +883,7 @@ spec:
               mountPath: /etc/etcd/ssl
             - name: kubernetes-pki
               mountPath: /etc/kubernetes/pki
-        - image: "k8s.gcr.io/autoscaling/cluster-autoscaler:v1.27.1"
+        - image: "k8s.gcr.io/autoscaling/cluster-autoscaler:v1.27.5"
           name: cluster-autoscaler
           resources:
             limits:
