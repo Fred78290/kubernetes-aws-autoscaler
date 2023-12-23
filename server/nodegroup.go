@@ -305,7 +305,7 @@ func (g *AutoScalerServerNodeGroup) addManagedNode(crd *v1alpha1.ManagedNode) (*
 
 		annoteMaster := ""
 
-		if g.configuration.UseK3S != nil && *g.configuration.UseK3S {
+		if g.configuration.Distribution != nil && *g.configuration.Distribution != types.KubeAdmDistributionName {
 			annoteMaster = "true"
 		}
 
@@ -331,7 +331,7 @@ func (g *AutoScalerServerNodeGroup) prepareNodes(c types.ClientGenerator, delta 
 	tempNodes := make([]*AutoScalerServerNode, 0, delta)
 	annoteMaster := ""
 
-	if g.configuration.UseK3S != nil && *g.configuration.UseK3S {
+	if g.configuration.Distribution != nil && *g.configuration.Distribution != types.KubeAdmDistributionName {
 		annoteMaster = "true"
 	}
 
@@ -847,11 +847,11 @@ func (g *AutoScalerServerNodeGroup) nodeName(vmIndex int, controlplane, managed 
 		var nodeName string
 
 		if controlplane {
-			nodeName = fmt.Sprintf("%s-%s-%02d", g.NodeGroupIdentifier, g.getControlPlanePrefix(), index)
+			nodeName = fmt.Sprintf(nodeNameTemplate, g.NodeGroupIdentifier, g.getControlPlanePrefix(), index)
 		} else if managed {
-			nodeName = fmt.Sprintf("%s-%s-%02d", g.NodeGroupIdentifier, g.getManagedNodePrefix(), index)
+			nodeName = fmt.Sprintf(nodeNameTemplate, g.NodeGroupIdentifier, g.getManagedNodePrefix(), index)
 		} else {
-			nodeName = fmt.Sprintf("%s-%s-%02d", g.NodeGroupIdentifier, g.getProvisionnedNodePrefix(), index)
+			nodeName = fmt.Sprintf(nodeNameTemplate, g.NodeGroupIdentifier, g.getProvisionnedNodePrefix(), index)
 		}
 
 		if found := g.findNamedNode(nodeName); found == nil {
@@ -867,11 +867,11 @@ func (g *AutoScalerServerNodeGroup) nodeName(vmIndex int, controlplane, managed 
 
 	// Should never reach this code
 	if controlplane {
-		return fmt.Sprintf("%s-%s-%02d", g.NodeGroupIdentifier, g.getControlPlanePrefix(), vmIndex-g.numOfExternalNodes-g.numOfProvisionnedNodes-g.numOfManagedNodes+g.numOfControlPlanes+1), vmIndex
+		return fmt.Sprintf(nodeNameTemplate, g.NodeGroupIdentifier, g.getControlPlanePrefix(), vmIndex-g.numOfExternalNodes-g.numOfProvisionnedNodes-g.numOfManagedNodes+g.numOfControlPlanes+1), vmIndex
 	} else if managed {
-		return fmt.Sprintf("%s-%s-%02d", g.NodeGroupIdentifier, g.getManagedNodePrefix(), vmIndex-g.numOfExternalNodes-g.numOfProvisionnedNodes+1), vmIndex
+		return fmt.Sprintf(nodeNameTemplate, g.NodeGroupIdentifier, g.getManagedNodePrefix(), vmIndex-g.numOfExternalNodes-g.numOfProvisionnedNodes+1), vmIndex
 	} else {
-		return fmt.Sprintf("%s-%s-%02d", g.NodeGroupIdentifier, g.getProvisionnedNodePrefix(), vmIndex-g.numOfExternalNodes-g.numOfManagedNodes+1), vmIndex
+		return fmt.Sprintf(nodeNameTemplate, g.NodeGroupIdentifier, g.getProvisionnedNodePrefix(), vmIndex-g.numOfExternalNodes-g.numOfManagedNodes+1), vmIndex
 	}
 }
 

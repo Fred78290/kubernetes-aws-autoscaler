@@ -3,8 +3,8 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   labels:
-    k8s-addon: cluster-autoscaler.addons.k8s.io
-    k8s-app: cluster-autoscaler
+    addon: cluster-autoscaler.addons.k8s.io
+    app: cluster-autoscaler
   name: cluster-autoscaler
   namespace: kube-system
 ---
@@ -13,8 +13,8 @@ kind: ClusterRole
 metadata:
   name: cluster-autoscaler
   labels:
-    k8s-addon: cluster-autoscaler.addons.k8s.io
-    k8s-app: cluster-autoscaler
+    addon: cluster-autoscaler.addons.k8s.io
+    app: cluster-autoscaler
 rules:
   - apiGroups: [""]
     resources: ["events", "endpoints"]
@@ -61,8 +61,8 @@ metadata:
   name: cluster-autoscaler
   namespace: kube-system
   labels:
-    k8s-addon: cluster-autoscaler.addons.k8s.io
-    k8s-app: cluster-autoscaler
+    addon: cluster-autoscaler.addons.k8s.io
+    app: cluster-autoscaler
 rules:
   - apiGroups: [""]
     resources: ["configmaps"]
@@ -77,8 +77,8 @@ kind: ClusterRoleBinding
 metadata:
   name: cluster-autoscaler
   labels:
-    k8s-addon: cluster-autoscaler.addons.k8s.io
-    k8s-app: cluster-autoscaler
+    addon: cluster-autoscaler.addons.k8s.io
+    app: cluster-autoscaler
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -94,8 +94,8 @@ metadata:
   name: cluster-autoscaler
   namespace: kube-system
   labels:
-    k8s-addon: cluster-autoscaler.addons.k8s.io
-    k8s-app: cluster-autoscaler
+    addon: cluster-autoscaler.addons.k8s.io
+    app: cluster-autoscaler
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -117,7 +117,7 @@ data:
     cacert: "/etc/ssl/client-cert/ca.crt"
   kubernetes-vmware-autoscaler.json: |
     {
-        "distribution": "k3s",
+        "distribution": "rke2",
         "use-external-etcd": false,
         "src-etcd-ssl-dir": "/etc/kubernetes/pki/etcd",
         "dst-etcd-ssl-dir": "/etc/kubernetes/pki/etcd",
@@ -134,7 +134,7 @@ data:
         "controlplane-name-prefix": "master",
         "nodePrice": 0,
         "podPrice": 0,
-        "image": "focal-k8s-k3s-aws-v1.27.9-containerd-amd64",
+        "image": "focal-k8s-cni-aws-v1.27.9-containerd-amd64",
         "cloud-provider": "external",
         "optionals": {
             "pricing": false,
@@ -144,10 +144,9 @@ data:
             "createNodeGroup": false,
             "deleteNodeGroup": false
         },
-        "k3s": {
+        "rke2": {
             "address": "172.30.73.121:6443",
             "token": "m1vmoc.3ox7sartsgk8f14l",
-            "datastore-endpoint": "",
             "extras-commands": []
         },
         "default-machine": "t3a.medium",
@@ -815,16 +814,16 @@ metadata:
   name: cluster-autoscaler
   namespace: kube-system
   labels:
-    k8s-app: cluster-autoscaler
+    app: cluster-autoscaler
 spec:
   replicas: 1
   selector:
     matchLabels:
-      k8s-app: cluster-autoscaler
+      app: cluster-autoscaler
   template:
     metadata:
       labels:
-        k8s-app: cluster-autoscaler
+        app: cluster-autoscaler
     spec:
       priorityClassName: system-cluster-critical
       serviceAccountName: cluster-autoscaler

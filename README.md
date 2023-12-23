@@ -6,28 +6,26 @@
 
 Kubernetes autoscaler for aws
 
-### Supported releases ###
+## Supported releases
 
-* 1.25.6
-    - This version is supported kubernetes v1.25
-* 1.25.7
-    - This version is supported kubernetes v1.25 and support k3s
-* 1.26.1
-    - This version is supported kubernetes v1.26
-* 1.26.2
-    - This version is supported kubernetes v1.26 and support k3s
+* 1.26.11
+  * This version is supported kubernetes v1.26 and support k3s, rke2, external kubernetes distribution
 * 1.27.9
-    - This version is supported kubernetes v1.27 and support k3s
+  * This version is supported kubernetes v1.27 and support k3s, rke2, external kubernetes distribution
+* 1.28.4
+  * This version is supported kubernetes v1.28 and support k3s, rke2, external kubernetes distribution
+* 1.29.0
+  * This version is supported kubernetes v1.29 and support k3s, rke2, external kubernetes distribution
 
 ## How it works
 
 This tool will drive AWS to deploy EC2 instance at the demand. The cluster autoscaler deployment use an enhanced version of cluster-autoscaler. <https://github.com/Fred78290/autoscaler>.
 
-This version use grpc to communicate with the cloud provider hosted outside the pod. A docker image is available here <https://hub.docker.com/r/fred78290/cluster-autoscaler>
+This version use grpc to communicate with the cloud provider hosted outside the pod. A docker image is available here <https://hub.docker.com//fred78290/cluster-autoscaler>
 
 You can also use the vanilla autoscaler with the [externalgrpc cloud provider](https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler/cloudprovider/externalgrpc)
 
-A sample of the cluster-autoscaler deployment is available at [examples/cluster-autoscaler.yaml](./examples/cluster-autoscaler.yaml). You must fill value between <>
+A sample of the cluster-autoscaler deployment is available at [examples/cluster-autoscaler.yaml](./examples/kubeadm/cluster-autoscaler.yaml). You must fill value between <>
 
 ### Before you must create a kubernetes cluster on AWS
 
@@ -47,15 +45,132 @@ The build process use make file. The simplest way to build is `make container`
 
 # New features
 
-## Use k3s
+## Use k3s, rke2 or external as kubernetes distribution method
 
-Instead using **kubeadm** as kubernetes deployment tool, it is possible to use **k3s**
+Instead using **kubeadm** as kubernetes distribution method, it is possible to use **k3s**, **rke2** or **external**
+
+**external** allow to use custom shell script to join cluster
+
+Samples provided here
+
+* [kubeadm](./examples/kubeadm/cluster-autoscaler.yaml)
+* [rke2](./examples/rke2/cluster-autoscaler.yaml)
+* [k3s](./examples/k3s/cluster-autoscaler.yaml)
+* [external](./examples/external/cluster-autoscaler.yaml)
 
 ## Use the vanilla autoscaler with extern gRPC cloud provider
 
 You can also use the vanilla autoscaler with the [externalgrpc cloud provider](https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler/cloudprovider/externalgrpc)
 
-A sample of the cluster-autoscaler deployment with vanilla autoscaler is available at [examples/cluster-autoscaler-vanilla.yaml](./examples/cluster-autoscaler-vanilla.yaml). You must fill value between <>
+Samples of the cluster-autoscaler deployment with vanilla autoscaler. You must fill value between <>
+
+* [kubeadm](./examples/kubeadm/cluster-autoscaler-vanilla.yaml)
+* [rke2](./examples/rke2/cluster-autoscaler-vanilla.yaml)
+* [k3s](./examples/rke2/cluster-autoscaler-vanilla.yaml)
+* [external](./examples/external/cluster-autoscaler-vanilla.yaml)
+
+## Use external kubernetes distribution
+
+When you use a custom method to create your cluster, you must provide a shell script to vmware-autoscaler to join the cluster. The script use a yaml config created by vmware-autscaler at the given path.
+
+config: /etc/default/vmware-autoscaler-config.yaml
+
+```yaml
+provider-id: vsphere://42373f8d-b72d-21c0-4299-a667a18c9fce
+max-pods: 110
+node-name: vmware-dev-rke2-woker-01
+server: 192.168.1.120:9345
+token: K1060b887525bbfa7472036caa8a3c36b550fbf05e6f8e3dbdd970739cbd7373537
+disable-cloud-controller: false
+````
+
+If you declare to use an external etcd service
+
+```yaml
+datastore-endpoint: https://1.2.3.4:2379
+datastore-cafile: /etc/ssl/etcd/ca.pem
+datastore-certfile: /etc/ssl/etcd/etcd.pem
+datastore-keyfile: /etc/ssl/etcd/etcd-key.pem
+```
+
+You can also provide extras config onto this file
+
+```json
+{
+  "external": {
+    "join-command": "/usr/local/bin/join-cluster.sh"
+    "config-path": "/etc/default/vmware-autoscaler-config.yaml"
+    "extra-config": {
+        "mydata": {
+          "extra": "ball"
+        },
+        "...": "..."
+    }
+  }
+}
+```
+
+Your script is responsible to set the correct kubelet flags such as max-pods=110, provider-id=aws://<zone-id>/<instance-id>, cloud-provider=external, ...
+
+## Annotations requirements
+
+If you expected to use vmware-autoscaler on already deployed kubernetes cluster, you must add some node annotations to existing node
+
+Also don't forget to create an image usable by vmware-autoscaler to scale up the cluster [create-image.sh](https://raw.githubusercontent.com/Fred78290/autoscaled-masterkube-vmware/master/bin/create-image.sh)
+
+| Annotation | Description | Value |
+| --- | --- | --- |
+| `cluster-autoscaler.kubernetes.io/scale-down-disabled` | Avoid scale down for this node |true|
+| `cluster.autoscaler.nodegroup/name` | Node group name |aws-dev-rke2|
+| `cluster.autoscaler.nodegroup/autoprovision` | Tell if the node is provisionned by vmware-autoscaler |false|
+| `cluster.autoscaler.nodegroup/instance-id` | The vm UUID |42373f8d-b72d-21c0-4299-a667a18c9fce|
+| `cluster.autoscaler.nodegroup/instance-name` | The instance name |aws-dev-rke2-master-01|
+| `cluster.autoscaler.nodegroup/managed` | Tell if the node is managed by vmware-autoscaler not autoscaled |false|
+| `cluster.autoscaler.nodegroup/node-index` | The node index, will be set if missing |0|
+
+Sample master node
+
+```text
+    cluster-autoscaler.kubernetes.io/scale-down-disabled: "true"
+    cluster.autoscaler.nodegroup/autoprovision: "false"
+    cluster.autoscaler.nodegroup/instance-id: 42373f8d-b72d-21c0-4299-a667a18c9fce
+    cluster.autoscaler.nodegroup/instance-name: aws-dev-rke2-master-01
+    cluster.autoscaler.nodegroup/managed: "false" 
+    cluster.autoscaler.nodegroup/name: aws-dev-rke2
+    cluster.autoscaler.nodegroup/node-index: "0"
+```
+
+Sample first worker node
+
+```text
+    cluster-autoscaler.kubernetes.io/scale-down-disabled: "true"
+    cluster.autoscaler.nodegroup/autoprovision: "false"
+    cluster.autoscaler.nodegroup/instance-id: 42370879-d4f7-eab0-a1c2-918a97ac6856
+    cluster.autoscaler.nodegroup/managed: "false"
+    cluster.autoscaler.nodegroup/name: vmware-dev-rke2
+    cluster.autoscaler.nodegroup/node-index: "1"
+```
+
+Sample autoscaled worker node
+
+```text
+    cluster-autoscaler.kubernetes.io/scale-down-disabled: "false"
+    cluster.autoscaler.nodegroup/autoprovision: "true"
+    cluster.autoscaler.nodegroup/instance-id: 3d25c629-3f1d-46b3-be9f-b95db2a64859
+    cluster.autoscaler.nodegroup/managed: "false"
+    cluster.autoscaler.nodegroup/name: vmware-dev-rke2
+    cluster.autoscaler.nodegroup/node-index: "2"
+```
+
+## Node labels
+
+These labels will be added
+
+| Label | Description | Value |
+| --- | --- | --- |
+|`node-role.kubernetes.io/control-plane`|Tell if the node is control-plane |true|
+|`node-role.kubernetes.io/master`|Tell if the node is master |true|
+|`node-role.kubernetes.io/worker`|Tell if the node is worker |true|
 
 ## Cloud provider AWS compliant
 
@@ -156,6 +271,7 @@ As example of use generated by autoscaled-masterkube-aws scripts [autoscaled-mas
 
 ```json
 {
+    "distribution": "rke2",
     "use-external-etcd": false,
     "src-etcd-ssl-dir": "/etc/kubernetes/pki/etcd",
     "dst-etcd-ssl-dir": "/etc/kubernetes/pki/etcd",
@@ -172,7 +288,7 @@ As example of use generated by autoscaled-masterkube-aws scripts [autoscaled-mas
     "controlplane-name-prefix": "master",
     "nodePrice": 0,
     "podPrice": 0,
-    "image": "focal-k8s-cni-aws-v1.26.1-containerd-amd64",
+    "image": "focal-k8s-rke2-aws-v1.29.0-containerd-amd64",
     "cloud-provider": "external",
     "optionals": {
         "pricing": false,
@@ -189,6 +305,28 @@ As example of use generated by autoscaled-masterkube-aws scripts [autoscaled-mas
         "extras-args": [
             "--ignore-preflight-errors=All"
         ]
+    },
+    "k3s": {
+        "address": "172.30.73.121:6443",
+        "token": "m1vmoc.3ox7sartsgk8f14l",
+        "datastore-endpoint": "https://1.2.3.4:2379",
+        "extras-commands": []
+    },
+    "rke2": {
+        "address": "172.30.73.121:6443",
+        "token": "m1vmoc.3ox7sartsgk8f14l",
+        "datastore-endpoint": "https://1.2.3.4:2379",
+        "extras-commands": []
+    },
+    "external": {
+        "address": "172.30.73.121:6443",
+        "token": "m1vmoc.3ox7sartsgk8f14l",
+        "datastore-endpoint": "https://1.2.3.4:2379",
+        "join-command": "/usr/local/bin/join-cluster.sh",
+        "config-path": "/etc/default/vmware-autoscaler-config.yaml",
+        "extra-config": {
+            "...": "..."
+        }
     },
     "default-machine": "t3a.medium",
     "machines": {
@@ -852,4 +990,4 @@ As example of use generated by autoscaled-masterkube-aws scripts [autoscaled-mas
 
 # Unmaintened releases
 
-All release before 1.25.6 and 1.26.1 are not maintened
+All release before 1.26.11 are not maintened

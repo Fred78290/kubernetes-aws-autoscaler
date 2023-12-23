@@ -35,6 +35,13 @@ const (
 	ManagedNodeMaxDiskSize = 1024 * 1024
 )
 
+const (
+	RKE2DistributionName     = "rke2"
+	K3SDistributionName      = "k3s"
+	KubeAdmDistributionName  = "kubeadm"
+	ExternalDistributionName = "external"
+)
+
 // KubernetesLabel labels
 type KubernetesLabel map[string]string
 
@@ -140,11 +147,19 @@ type KubeJoinConfig struct {
 	ExtraArguments []string `json:"extras-args,omitempty"`
 }
 
-type RancherJoinConfig struct {
-	Address           string   `json:"address,omitempty"`
-	Token             string   `json:"token,omitempty"`
-	ExtraCommands     []string `json:"extras-commands,omitempty"`
-	DatastoreEndpoint string   `json:"datastore-endpoint,omitempty"`
+type K3SJoinConfig struct {
+	Address                   string   `json:"address,omitempty"`
+	Token                     string   `json:"token,omitempty"`
+	ExtraCommands             []string `json:"extras-commands,omitempty"`
+	DatastoreEndpoint         string   `json:"datastore-endpoint,omitempty"`
+	DeleteCredentialsProvider bool     `json:"delete-credentials-provider,omitempty"`
+}
+
+type RKE2JoinConfig struct {
+	Address                   string   `json:"address,omitempty"`
+	Token                     string   `json:"token,omitempty"`
+	ExtraCommands             []string `json:"extras-commands,omitempty"`
+	DeleteCredentialsProvider bool     `json:"delete-credentials-provider,omitempty"`
 }
 
 type ExternalJoinConfig struct {
@@ -249,8 +264,8 @@ type AutoScalerServerConfig struct {
 	NodePrice                  float64                           `json:"nodePrice"`                                 // Optional, The VM price
 	PodPrice                   float64                           `json:"podPrice"`                                  // Optional, The pod price
 	KubeAdm                    *KubeJoinConfig                   `json:"kubeadm"`
-	K3S                        *RancherJoinConfig                `json:"k3s,omitempty"`
-	RKE2                       *RancherJoinConfig                `json:"rke2,omitempty"`
+	K3S                        *K3SJoinConfig                    `json:"k3s,omitempty"`
+	RKE2                       *RKE2JoinConfig                   `json:"rke2,omitempty"`
 	External                   *ExternalJoinConfig               `json:"external,omitempty"`
 	DefaultMachineType         string                            `default:"standard" json:"default-machine"`
 	NodeLabels                 KubernetesLabel                   `json:"nodeLabels"`
@@ -370,7 +385,7 @@ func NewConfig() *Config {
 	return &Config{
 		APIServerURL:             "",
 		KubeConfig:               "",
-		Distribution:             "kubeadm",
+		Distribution:             KubeAdmDistributionName,
 		UseExternalEtdc:          false,
 		UseVanillaGrpcProvider:   false,
 		UseControllerManager:     true,
@@ -418,7 +433,7 @@ func (cfg *Config) ParseFlags(args []string, version string) error {
 	app.Flag("debug", "Debug mode").Default("false").BoolVar(&cfg.DebugMode)
 
 	app.Flag("use-k3s", "Tell we use k3s in place of kubeadm (deprecated, use distribution flag)").Default("false").BoolVar(&cfg.UseK3S)
-	app.Flag("distribution", "Which kubernetes distribution to use: kubeadm, k3s, rke2, external").Default("kubeadm").EnumVar(&cfg.Distribution, "kubeadm", "k3s", "rke2", "external")
+	app.Flag("distribution", "Which kubernetes distribution to use: kubeadm, k3s, rke2, external").Default(KubeAdmDistributionName).EnumVar(&cfg.Distribution, KubeAdmDistributionName, K3SDistributionName, RKE2DistributionName, ExternalDistributionName)
 	app.Flag("use-vanilla-grpc", "Tell we use vanilla autoscaler externalgrpc cloudprovider").Default("false").BoolVar(&cfg.UseVanillaGrpcProvider)
 	app.Flag("use-controller-manager", "Tell we use aws controller manager").Default("true").BoolVar(&cfg.UseControllerManager)
 

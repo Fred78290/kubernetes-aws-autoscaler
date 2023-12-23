@@ -1656,8 +1656,33 @@ func StartServer(kubeClient types.ClientGenerator, c *types.Config) {
 		}
 	}
 
-	if config.UseK3S == nil {
-		config.UseK3S = &c.UseK3S
+	if config.Distribution == nil {
+		if c.UseK3S {
+			c.Distribution = types.K3SDistributionName
+		}
+
+		config.Distribution = &c.Distribution
+	}
+
+	switch *config.Distribution {
+	case types.KubeAdmDistributionName:
+		if config.KubeAdm == nil {
+			glog.Fatal("KubeAdm configuration is not defined")
+		}
+	case types.K3SDistributionName:
+		if config.K3S == nil {
+			glog.Fatal("K3S configuration is not defined")
+		}
+	case types.RKE2DistributionName:
+		if config.RKE2 == nil {
+			glog.Fatal("RKE2 configuration is not defined")
+		}
+	case types.ExternalDistributionName:
+		if config.External == nil {
+			glog.Fatal("External configuration is not defined")
+		}
+	default:
+		glog.Fatalf("Unsupported kubernetes distribution: %s", *config.Distribution)
 	}
 
 	if config.DebugMode == nil {

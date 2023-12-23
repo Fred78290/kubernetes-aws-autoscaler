@@ -3,8 +3,8 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   labels:
-    k8s-addon: cluster-autoscaler.addons.k8s.io
-    k8s-app: cluster-autoscaler
+    addon: cluster-autoscaler.addons.k8s.io
+    app: cluster-autoscaler
   name: cluster-autoscaler
   namespace: kube-system
 ---
@@ -13,8 +13,8 @@ kind: ClusterRole
 metadata:
   name: cluster-autoscaler
   labels:
-    k8s-addon: cluster-autoscaler.addons.k8s.io
-    k8s-app: cluster-autoscaler
+    addon: cluster-autoscaler.addons.k8s.io
+    app: cluster-autoscaler
 rules:
   - apiGroups: [""]
     resources: ["events", "endpoints"]
@@ -61,8 +61,8 @@ metadata:
   name: cluster-autoscaler
   namespace: kube-system
   labels:
-    k8s-addon: cluster-autoscaler.addons.k8s.io
-    k8s-app: cluster-autoscaler
+    addon: cluster-autoscaler.addons.k8s.io
+    app: cluster-autoscaler
 rules:
   - apiGroups: [""]
     resources: ["configmaps"]
@@ -77,8 +77,8 @@ kind: ClusterRoleBinding
 metadata:
   name: cluster-autoscaler
   labels:
-    k8s-addon: cluster-autoscaler.addons.k8s.io
-    k8s-app: cluster-autoscaler
+    addon: cluster-autoscaler.addons.k8s.io
+    app: cluster-autoscaler
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -94,8 +94,8 @@ metadata:
   name: cluster-autoscaler
   namespace: kube-system
   labels:
-    k8s-addon: cluster-autoscaler.addons.k8s.io
-    k8s-app: cluster-autoscaler
+    addon: cluster-autoscaler.addons.k8s.io
+    app: cluster-autoscaler
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -116,6 +116,7 @@ data:
     timeout: 120
   kubernetes-vmware-autoscaler.json: |
     {
+        "distribution": "k3s",
         "use-external-etcd": false,
         "src-etcd-ssl-dir": "/etc/kubernetes/pki/etcd",
         "dst-etcd-ssl-dir": "/etc/kubernetes/pki/etcd",
@@ -132,7 +133,7 @@ data:
         "controlplane-name-prefix": "master",
         "nodePrice": 0,
         "podPrice": 0,
-        "image": "focal-k8s-rke2-aws-v1.27.9-containerd-amd64",
+        "image": "focal-k8s-cni-aws-v1.27.9-containerd-amd64",
         "cloud-provider": "external",
         "optionals": {
             "pricing": false,
@@ -142,7 +143,7 @@ data:
             "createNodeGroup": false,
             "deleteNodeGroup": false
         },
-        "rke2": {
+        "k3s": {
             "address": "172.30.73.121:6443",
             "token": "m1vmoc.3ox7sartsgk8f14l",
             "datastore-endpoint": "",
@@ -823,12 +824,66 @@ spec:
     metadata:
       labels:
         app: cluster-autoscaler
-      annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ""
     spec:
+      priorityClassName: system-cluster-critical
       serviceAccountName: cluster-autoscaler
+      securityContext:
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+      nodeSelector:
+        master: "true"
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/control-plane
+          effect: NoSchedule
+      initContainers:
+        - image: busybox
+          name: cluster-autoscaler-init
+          securityContext:
+            privileged: true
+          command:
+            - /bin/sh
+            - "-c"
+            - rm -f /var/run/cluster-autoscaler/aws.sock
+          volumeMounts:
+            - name: cluster-socket
+              mountPath: /var/run/cluster-autoscaler
       containers:
-        - image: fred78290/cluster-autoscaler:v1.13.1
+        - image: "fred78290/aws-autoscaler:v1.29.0"
+          name: aws-autoscaler
+          resources:
+            limits:
+              cpu: 100m
+              memory: 300Mi
+            requests:
+              cpu: 100m
+              memory: 300Mi
+          command:
+            - /usr/local/bin/aws-autoscaler
+            - "--no-use-external-etcd"
+            - "--no-use-vanilla-grpc"
+            - "--use-controller-manager"
+            - "--src-etcd-ssl-dir=/etc/etcd/ssl"
+            - "--dst-etcd-ssl-dir=/etc/etcd/ssl"
+            - "--config=/etc/cluster/kubernetes-aws-autoscaler.json"
+            - "--save=/var/run/cluster-autoscaler/aws-autoscaler-state.json"
+            - "--log-level=info"
+          imagePullPolicy: Always
+          volumeMounts:
+            - name: cluster-socket
+              mountPath: /var/run/cluster-autoscaler
+            - name: config-cluster-autoscaler
+              mountPath: /etc/cluster
+            - name: autoscaler-ssh-keys
+              mountPath: /etc/ssh
+            - name: etcd-ssl
+              mountPath: /etc/etcd/ssl
+            - name: kubernetes-pki
+              mountPath: /etc/kubernetes/pki
+        - image: "k8s.gcr.io/autoscaling/cluster-autoscaler:v1.28.2"
           name: cluster-autoscaler
           resources:
             limits:
@@ -839,41 +894,55 @@ spec:
               memory: 300Mi
           command:
             - ./cluster-autoscaler
-            - --v=4
-            - --stderrthreshold=info
-            - --cloud-provider=grpc
-            - --cloud-config=/etc/cluster-autoscaler/grpc.conf
-            - --nodes=$(MINNODES):$(MAXNODES):true/$(NODEGROUP_ID)
-            - --max-nodes-total=3
-            - --cores-total=0:16
-            - --memory-total=2:24
-            - --node-autoprovisioning-enabled
-            - --max-autoprovisioned-node-group-count=1
-            - --scale-down-enabled=true
-            - --scale-down-delay-after-add=1m
-            - --scale-down-delay-after-delete=1m
-            - --scale-down-delay-after-failure=1m
-            - --scale-down-unneeded-time=1m
-            - --scale-down-unready-time=1m"
-          imagePullPolicy: "Always"
-          env:
-            - name: MINNODES
-              value: "1"
-            - name: MAXNODES
-              value: "5"
-            - name: NODEGROUP_ID
-              value: aws-ca-k8s
+            - "--v=1"
+            - "--stderrthreshold=info"
+            - "--cloud-provider=externalgrpc"
+            - "--cloud-config=/etc/cluster/cloud-config"
+            - "--max-nodes-total=9"
+            - "--cores-total=0:16"
+            - "--memory-total=0:48"
+            - "--node-autoprovisioning-enabled"
+            - "--max-autoprovisioned-node-group-count=1"
+            - "--scale-down-enabled=true"
+            - "--scale-down-delay-after-add=1m"
+            - "--scale-down-delay-after-delete=1m"
+            - "--scale-down-delay-after-failure=1m"
+            - "--scale-down-unneeded-time=1m"
+            - "--scale-down-unready-time=1m"
+            - "--unremovable-node-recheck-timeout=1m"
+          imagePullPolicy: Always
           volumeMounts:
+            - name: cluster-socket
+              mountPath: /var/run/cluster-autoscaler
             - name: ssl-certs
               mountPath: /etc/ssl/certs/ca-certificates.crt
               readOnly: true
-            - name: cloud-config
-              mountPath: /etc/cluster-autoscaler
+            - name: config-cluster-autoscaler
+              mountPath: /etc/cluster
               readOnly: true
+            - name: cluster-autoscaler-grpc-client-cert
+              mountPath: "/etc/ssl/client-cert"
       volumes:
-        - name: cloud-config
+        - name: cluster-socket
+          emptyDir: {}
+        - name: config-cluster-autoscaler
           configMap:
-            name: cloud-config
+            name: config-cluster-autoscaler
         - name: ssl-certs
           hostPath:
-            path: "/etc/ssl/certs/ca-certificates.crt"
+            path: /etc/ssl/certs/ca-certificates.crt
+        - name: autoscaler-ssh-keys
+          secret:
+            secretName: autoscaler-ssh-keys
+            defaultMode: 0440
+        - name: etcd-ssl
+          secret:
+            secretName: etcd-ssl
+            defaultMode: 0440
+        - name: kubernetes-pki
+          configMap:
+            name: kubernetes-pki
+        - name: cluster-autoscaler-grpc-client-cert
+          secret:
+            secretName: cluster-autoscaler-grpc-client-cert
+            defaultMode: 0440

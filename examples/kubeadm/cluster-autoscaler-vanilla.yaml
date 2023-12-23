@@ -3,8 +3,8 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   labels:
-    k8s-addon: cluster-autoscaler.addons.k8s.io
-    k8s-app: cluster-autoscaler
+    addon: cluster-autoscaler.addons.k8s.io
+    app: cluster-autoscaler
   name: cluster-autoscaler
   namespace: kube-system
 ---
@@ -13,8 +13,8 @@ kind: ClusterRole
 metadata:
   name: cluster-autoscaler
   labels:
-    k8s-addon: cluster-autoscaler.addons.k8s.io
-    k8s-app: cluster-autoscaler
+    addon: cluster-autoscaler.addons.k8s.io
+    app: cluster-autoscaler
 rules:
   - apiGroups: [""]
     resources: ["events", "endpoints"]
@@ -61,8 +61,8 @@ metadata:
   name: cluster-autoscaler
   namespace: kube-system
   labels:
-    k8s-addon: cluster-autoscaler.addons.k8s.io
-    k8s-app: cluster-autoscaler
+    addon: cluster-autoscaler.addons.k8s.io
+    app: cluster-autoscaler
 rules:
   - apiGroups: [""]
     resources: ["configmaps"]
@@ -77,8 +77,8 @@ kind: ClusterRoleBinding
 metadata:
   name: cluster-autoscaler
   labels:
-    k8s-addon: cluster-autoscaler.addons.k8s.io
-    k8s-app: cluster-autoscaler
+    addon: cluster-autoscaler.addons.k8s.io
+    app: cluster-autoscaler
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -94,8 +94,8 @@ metadata:
   name: cluster-autoscaler
   namespace: kube-system
   labels:
-    k8s-addon: cluster-autoscaler.addons.k8s.io
-    k8s-app: cluster-autoscaler
+    addon: cluster-autoscaler.addons.k8s.io
+    app: cluster-autoscaler
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -117,6 +117,7 @@ data:
     cacert: "/etc/ssl/client-cert/ca.crt"
   kubernetes-vmware-autoscaler.json: |
     {
+        "distribution": "kubeadm",
         "use-external-etcd": false,
         "src-etcd-ssl-dir": "/etc/kubernetes/pki/etcd",
         "dst-etcd-ssl-dir": "/etc/kubernetes/pki/etcd",
@@ -146,7 +147,7 @@ data:
         "kubeadm": {
             "address": "172.30.73.121:6443",
             "token": "m1vmoc.3ox7sartsgk8f14l",
-            "ca": "sha256:70ecc6f82ad1a6938d6fbd4865f4a8d0fb4fcec70cea4140dff3b657b9600c0e",
+            "ca": "sha256:c7a86a7a9a03a628b59207f4f3b3e038ebd03260f3ad5ba28f364d513b01f542",
             "extras-args": [
                 "--ignore-preflight-errors=All"
             ]
@@ -816,16 +817,16 @@ metadata:
   name: cluster-autoscaler
   namespace: kube-system
   labels:
-    k8s-app: cluster-autoscaler
+    app: cluster-autoscaler
 spec:
   replicas: 1
   selector:
     matchLabels:
-      k8s-app: cluster-autoscaler
+      app: cluster-autoscaler
   template:
     metadata:
       labels:
-        k8s-app: cluster-autoscaler
+        app: cluster-autoscaler
     spec:
       priorityClassName: system-cluster-critical
       serviceAccountName: cluster-autoscaler

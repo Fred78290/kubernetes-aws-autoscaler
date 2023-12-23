@@ -112,7 +112,7 @@ func (vm *AutoScalerServerNode) waitReady(c types.ClientGenerator) error {
 func (vm *AutoScalerServerNode) recopyEtcdSslFilesIfNeeded() error {
 	var err error
 
-	if vm.ControlPlaneNode || *vm.serverConfig.UseExternalEtdc {
+	if (vm.serverConfig.Distribution == nil || *vm.serverConfig.Distribution != types.RKE2DistributionName) && (vm.ControlPlaneNode || *vm.serverConfig.UseExternalEtdc) {
 		glog.Infof("Recopy Etcd ssl files for instance: %s in node group: %s", vm.InstanceName, vm.NodeGroupID)
 
 		if err = utils.Scp(vm.serverConfig.SSH, vm.IPAddress, vm.serverConfig.ExtSourceEtcdSslDir, "."); err != nil {
@@ -132,7 +132,7 @@ func (vm *AutoScalerServerNode) recopyEtcdSslFilesIfNeeded() error {
 func (vm *AutoScalerServerNode) recopyKubernetesPKIIfNeeded() error {
 	var err error
 
-	if vm.ControlPlaneNode {
+	if (vm.serverConfig.Distribution == nil || *vm.serverConfig.Distribution != types.RKE2DistributionName) && vm.ControlPlaneNode {
 		glog.Infof("Recopy PKI for instance: %s in node group: %s", vm.InstanceName, vm.NodeGroupID)
 
 		if err = utils.Scp(vm.serverConfig.SSH, vm.IPAddress, vm.serverConfig.KubernetesPKISourceDir, "."); err != nil {
@@ -297,13 +297,6 @@ func (vm *AutoScalerServerNode) rke2AgentJoin(c types.ClientGenerator) error {
 			"rke2-ingress-nginx",
 			"rke2-metrics-server",
 		}
-
-		if vm.serverConfig.UseExternalEtdc != nil && *vm.serverConfig.UseExternalEtdc {
-			config["datastore-endpoint"] = rke2.DatastoreEndpoint
-			config["datastore-cafile"] = fmt.Sprintf("%s/ca.pem", vm.serverConfig.ExtDestinationEtcdSslDir)
-			config["datastore-certfile"] = fmt.Sprintf("%s/etcd.pem", vm.serverConfig.ExtDestinationEtcdSslDir)
-			config["datastore-keyfile"] = fmt.Sprintf("%s/etcd-key.pem", vm.serverConfig.ExtDestinationEtcdSslDir)
-		}
 	}
 
 	// Append extras arguments
@@ -336,11 +329,16 @@ func (vm *AutoScalerServerNode) rke2AgentJoin(c types.ClientGenerator) error {
 			if err = utils.Scp(vm.serverConfig.SSH, vm.IPAddress, f.Name(), tmpConfigDestinationFile); err != nil {
 				result = fmt.Errorf("unable to transfer file: %s to %s, reason: %v", f.Name(), tmpConfigDestinationFile, err)
 			} else {
-				args := []string{
+				args := make([]string, 0, 5)
+
+				if rke2.DeleteCredentialsProvider {
+					args = append(args, "rm -rf /var/lib/rancher/credentialprovider")
+				}
+
+				args = append(args,
 					fmt.Sprintf("cp %s %s", tmpConfigDestinationFile, dstFile),
 					fmt.Sprintf("systemctl enable %s.service", service),
-					fmt.Sprintf("systemctl start %s.service", service),
-				}
+					fmt.Sprintf("systemctl start %s.service", service))
 
 				result = vm.executeCommands(args, false, c)
 			}
@@ -375,6 +373,7 @@ func (vm *AutoScalerServerNode) k3sAgentJoin(c types.ClientGenerator) error {
 		} else {
 			args = append(args, "echo 'K3S_MODE=server' > /etc/default/k3s", "echo K3S_DISABLE_ARGS='--disable=servicelb --disable=traefik --disable=metrics-server' > /etc/systemd/system/k3s.disabled.env")
 		}
+
 		if vm.serverConfig.UseExternalEtdc != nil && *vm.serverConfig.UseExternalEtdc {
 			args = append(args, fmt.Sprintf("echo K3S_SERVER_ARGS='--datastore-endpoint=%s --datastore-cafile=%s/ca.pem --datastore-certfile=%s/etcd.pem --datastore-keyfile=%s/etcd-key.pem' > /etc/systemd/system/k3s.server.env", k3s.DatastoreEndpoint, vm.serverConfig.ExtDestinationEtcdSslDir, vm.serverConfig.ExtDestinationEtcdSslDir, vm.serverConfig.ExtDestinationEtcdSslDir))
 		}
@@ -385,6 +384,10 @@ func (vm *AutoScalerServerNode) k3sAgentJoin(c types.ClientGenerator) error {
 		args = append(args, k3s.ExtraCommands...)
 	}
 
+	if k3s.DeleteCredentialsProvider {
+		args = append(args, "rm -rf /var/lib/rancher/credentialprovider")
+	}
+
 	args = append(args, "systemctl enable k3s.service", "systemctl start k3s.service")
 
 	return vm.executeCommands(args, false, c)
@@ -392,11 +395,11 @@ func (vm *AutoScalerServerNode) k3sAgentJoin(c types.ClientGenerator) error {
 
 func (vm *AutoScalerServerNode) joinCluster(c types.ClientGenerator) error {
 	if vm.serverConfig.Distribution != nil {
-		if *vm.serverConfig.Distribution == "k3s" {
+		if *vm.serverConfig.Distribution == types.K3SDistributionName {
 			return vm.k3sAgentJoin(c)
-		} else if *vm.serverConfig.Distribution == "rke2" {
+		} else if *vm.serverConfig.Distribution == types.RKE2DistributionName {
 			return vm.rke2AgentJoin(c)
-		} else if *vm.serverConfig.Distribution == "external" {
+		} else if *vm.serverConfig.Distribution == types.ExternalDistributionName {
 			return vm.externalAgentJoin(c)
 		}
 	}
