@@ -6,13 +6,13 @@ toolchain go1.21.5
 
 require (
 	github.com/alecthomas/kingpin v2.2.6+incompatible
-	github.com/aws/aws-sdk-go v1.49.7
+	github.com/aws/aws-sdk-go v1.49.9
 	github.com/linki/instrumented_http v0.3.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.8.4
 	golang.org/x/crypto v0.17.0
 	google.golang.org/grpc v1.60.1
-	google.golang.org/protobuf v1.31.0
+	google.golang.org/protobuf v1.32.0
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.29.0
 	k8s.io/apiextensions-apiserver v0.29.0
