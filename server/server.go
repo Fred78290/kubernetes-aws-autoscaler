@@ -976,6 +976,12 @@ func (s *AutoScalerServerApp) DecreaseTargetSize(ctx context.Context, request *a
 	newSize := nodeGroup.targetSize() + int(request.GetDelta())
 
 	if newSize < len(nodeGroup.Nodes) {
+		if nodeGroup.havingDeletingNodes() {
+			return &apigrpc.DecreaseTargetSizeReply{
+				Error: nil,
+			}, nil
+		}
+
 		glog.Errorf(constantes.ErrDecreaseSizeAttemptDeleteNodes, nodeGroup.targetSize(), request.GetDelta(), newSize)
 
 		return &apigrpc.DecreaseTargetSizeReply{

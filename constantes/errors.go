@@ -133,6 +133,9 @@ const (
 	// ErrVMNotFound error msg
 	ErrVMNotFound = "unable to find VM: %s"
 
+	// ErrVMNotFound error msg
+	ErrVMAlreadyDeleting = "VM: %s, already deleting"
+
 	// ErrZoneIDNotFound error msg
 	ErrZoneIDNotFound = "unable to find zone: %s"
 

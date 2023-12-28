@@ -42,6 +42,7 @@ const (
 	ServerNodeStateDeleted
 	ServerNodeStateCreating
 	ServerNodeStateRunning
+	ServerNodeStateDeleting
 )
 
 // AutoScalerServerNodeGroup Group all AutoScaler VM created inside a NodeGroup
@@ -224,10 +225,14 @@ func (g *AutoScalerServerNodeGroup) prepareDeleteNodes(delta int) []*AutoScalerS
 }
 
 func (g *AutoScalerServerNodeGroup) destroyNode(c types.ClientGenerator, node *AutoScalerServerNode) error {
+	g.RunningNodes[node.NodeIndex] = ServerNodeStateDeleting
+
+	e := node.deleteVM(c)
+
 	g.RunningNodes[node.NodeIndex] = ServerNodeStateDeleted
 	g.removeNamedNode(node.InstanceName)
 
-	return node.deleteVM(c)
+	return e
 }
 
 func (g *AutoScalerServerNodeGroup) destroyNodes(c types.ClientGenerator, nodes []*AutoScalerServerNode) ([]*AutoScalerServerNode, error) {
@@ -766,6 +771,8 @@ func (g *AutoScalerServerNodeGroup) autoDiscoveryNodes(client types.ClientGenera
 func (g *AutoScalerServerNodeGroup) deleteNode(c types.ClientGenerator, node *AutoScalerServerNode) error {
 	var err error
 
+	g.RunningNodes[node.NodeIndex] = ServerNodeStateDeleting
+
 	if err = node.deleteVM(c); err != nil {
 		glog.Errorf(constantes.ErrUnableToDeleteVM, node.InstanceName, err)
 	}
@@ -890,4 +897,14 @@ func (g *AutoScalerServerNodeGroup) GetOptions(defaults *types.NodeGroupAutoscal
 	}
 
 	return defaults, nil
+}
+
+func (g *AutoScalerServerNodeGroup) havingDeletingNodes() bool {
+	for _, node := range g.Nodes {
+		if node.State == AutoScalerServerNodeStateDeleting {
+			return true
+		}
+	}
+
+	return false
 }

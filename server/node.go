@@ -52,6 +52,9 @@ const (
 	// AutoScalerServerNodeStateDeleted deleted state
 	AutoScalerServerNodeStateDeleted
 
+	// AutoScalerServerNodeStateDeleting deleting state
+	AutoScalerServerNodeStateDeleting
+
 	// AutoScalerServerNodeStateUndefined undefined state
 	AutoScalerServerNodeStateUndefined
 )
@@ -745,11 +748,14 @@ func (vm *AutoScalerServerNode) deleteVM(c types.ClientGenerator) error {
 
 	if (vm.NodeType != AutoScalerServerNodeAutoscaled && vm.NodeType != AutoScalerServerNodeManaged) || vm.runningInstance == nil {
 		err = fmt.Errorf(constantes.ErrVMNotProvisionnedByMe, vm.InstanceName)
-	} else {
+	} else if vm.State != AutoScalerServerNodeStateDeleting {
 		if status, err = vm.runningInstance.Status(); err == nil {
+			vm.State = AutoScalerServerNodeStateDeleting
+
 			if err = vm.unregisterDNS(status.Address); err != nil {
 				glog.Warnf("unable to unregister DNS entry, reason: %v", err)
 			}
+
 			if status.Powered {
 				// Delete kubernetes node only is alive
 				if _, err = c.GetNode(vm.NodeName); err == nil {
@@ -779,6 +785,8 @@ func (vm *AutoScalerServerNode) deleteVM(c types.ClientGenerator) error {
 				err = fmt.Errorf(constantes.ErrDeleteVMFailed, vm.InstanceName, err)
 			}
 		}
+	} else {
+		err = fmt.Errorf(constantes.ErrVMAlreadyDeleting, vm.InstanceName)
 	}
 
 	if err == nil {

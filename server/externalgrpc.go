@@ -315,6 +315,10 @@ func (v *externalgrpcServerApp) NodeGroupDecreaseTargetSize(ctx context.Context,
 	newSize := nodeGroup.targetSize() + int(request.GetDelta())
 
 	if newSize < len(nodeGroup.Nodes) {
+		if nodeGroup.havingDeletingNodes() {
+			return &externalgrpc.NodeGroupDecreaseTargetSizeResponse{}, nil
+		}
+
 		glog.Errorf(constantes.ErrDecreaseSizeAttemptDeleteNodes, nodeGroup.targetSize(), request.GetDelta(), newSize)
 
 		return nil, fmt.Errorf(constantes.ErrDecreaseSizeAttemptDeleteNodes, nodeGroup.targetSize(), request.GetDelta(), newSize)
