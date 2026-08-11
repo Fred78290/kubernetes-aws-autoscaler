@@ -161,7 +161,7 @@ func (s *AutoScalerServerApp) createNodeGroup(nodeGroupID string) (*AutoScalerSe
 			glog.Infof("Create node group, ID:%s", nodeGroupID)
 
 			if _, err := nodeGroup.addNodes(s.kubeClient, nodeGroup.MinNodeSize); err != nil {
-				glog.Errorf(err.Error())
+				glog.Errorf("%s", err.Error())
 
 				return nodeGroup, err
 			}

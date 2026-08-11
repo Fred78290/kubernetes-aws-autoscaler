@@ -18,6 +18,8 @@ Kubernetes autoscaler for aws
     - This version is supported kubernetes v1.26 and support k3s
 * 1.27.1
     - This version is supported kubernetes v1.27 and support k3s
+* 1.36.0
+    - This version is supported kubernetes v1.36 and support k3s
 
 ## How it works
 
